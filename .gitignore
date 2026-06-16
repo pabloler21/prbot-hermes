@@ -1,0 +1,15 @@
+# Secrets — nunca commitear archivos .env reales (solo se versiona .env.example)
+.env
+*.env.local
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.ruff_cache/
+
+# Node (workers de BullMQ, si la Fase 4 elige TypeScript)
+node_modules/
+
+# OS / editor
+.DS_Store
