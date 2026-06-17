@@ -20,11 +20,13 @@ EnvironmentFile=/home/hermes/.hermes/.env
 
 # IMPORTANTE: confirmar la ruta REAL del binario que dejó el instalador de Hermes
 # (p. ej. `which hermes` como usuario hermes) y ajustar ExecStart si difiere.
-ExecStart=/home/hermes/.hermes/bin/hermes gateway --config /home/hermes/.hermes/config.yaml
+ExecStart=/home/hermes/.hermes/hermes-agent/venv/bin/hermes gateway
 
 # Reinicio automático ante fallos.
 Restart=on-failure
 RestartSec=5
+# drain_timeout de Hermes es 180s; necesita al menos 210s para no recibir SIGKILL a mitad del drain.
+TimeoutStopSec=210
 
 # Endurecimiento básico (no escala privilegios).
 NoNewPrivileges=true

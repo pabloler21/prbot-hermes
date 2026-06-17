@@ -1,6 +1,6 @@
 # ADR-0002 — Despliegue del gateway de Hermes (Fase 1)
 
-- **Estado:** propuesto (se confirma al validar en el VPS)
+- **Estado:** confirmado (validado en VPS 2026-06-17)
 - **Fase:** 1
 - **Fecha:** 2026-06-17
 
@@ -13,9 +13,9 @@ artefactos de despliegue; la validación ocurre cuando el VPS esté provisionado
 
 ## Decisiones
 
-1. **Modelo LLM: `moonshotai/kimi-k2.6` vía OpenRouter.** Elegido por el usuario para el
-   bot interno de equipo. La API key se lee del entorno (`OPENROUTER_API_KEY`), no se
-   hardcodea.
+1. **Modelo LLM: `kimi-k2.7-code` vía OpenCode.** El usuario tiene suscripción Go activa
+   en OpenCode, lo que evita costos variables por token. La API key se lee del entorno
+   (`OPENCODE_API_KEY`), no se hardcodea. OpenRouter quedó descartado.
 
 2. **Sandbox backend `ssh`/host.** Más simple para la Fase 1 (sin instalar Docker); no hay
    acciones sobre GitHub todavía y `approvals.mode: manual` gatea los comandos peligrosos.
@@ -34,17 +34,19 @@ artefactos de despliegue; la validación ocurre cuando el VPS esté provisionado
 
 6. **Secrets solo en `~/.hermes/.env` (chmod 600).** Nunca en el config ni en el repo.
 
-## Supuestos explícitos
+## Supuestos reconciliados (al validar en VPS)
 
-- **Nombres de campos del `config.yaml`:** se siguieron los conceptos documentados de
-  Hermes (provider OpenRouter, channels.discord, approvals, sandbox, terminal). Los nombres
-  exactos (`api_key_env`, `token_env`, `allowed_users_env`, etc.) **deben reconciliarse**
-  contra el `config.yaml` que genera el instalador y la doc oficial. Si difieren, se ajusta
-  y se actualiza este ADR. (Regla del plan: asumir lo razonable y dejar el supuesto explícito.)
-- **Ruta del binario en `ExecStart`:** se asumió `/home/hermes/.hermes/bin/hermes`; debe
-  confirmarse con `which hermes` en el VPS.
-- **VPS pendiente de provisionar** (Oracle pide tarjeta; pospuesto a pedido del usuario).
-  La construcción de estos artefactos no depende del VPS; la validación sí.
+- **Ruta real del binario:** `/home/hermes/.hermes/hermes-agent/venv/bin/hermes`
+  (el instalador crea un venv dentro de `hermes-agent/`; no es `~/.hermes/bin/hermes`
+  como se asumía inicialmente). Corregido en `deploy/systemd/hermes-gateway.service`.
+- **TimeoutStopSec:** el `drain_timeout` de Hermes es 180s; el default de systemd (90s)
+  causaría SIGKILL a mitad del drain. Se fijó `TimeoutStopSec=210` en el service.
+- **VPS:** Oracle Cloud Always Free, VM.Standard.E2.1.Micro (AMD x86, 1 GB RAM),
+  Ubuntu 22.04, IP `137.131.202.213`. ARM Ampere descartado por falta de capacidad
+  en São Paulo AD-1.
+- **Intents de Discord:** el instalador no habilita automáticamente los Privileged Gateway
+  Intents en el Developer Portal. Deben activarse manualmente: Presence, Server Members
+  y Message Content Intent.
 
 ## Consecuencias
 

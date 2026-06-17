@@ -11,11 +11,12 @@
 # Si algún nombre difiere, ajustarlo y dejar constancia en el ADR.
 
 # --- Proveedor de LLM ---
+# Proveedor: OpenCode (suscripción Go del usuario). Confirmado en Fase 1, ADR-0002.
+# El instalador de Hermes soporta OpenCode nativamente; la API key se carga desde el .env.
 llm:
-  provider: openrouter
-  model: moonshotai/kimi-k2.6
-  # La API key se lee del entorno (cargado desde ~/.hermes/.env), no se escribe acá.
-  api_key_env: OPENROUTER_API_KEY
+  provider: opencode
+  model: kimi-k2.7-code
+  api_key_env: OPENCODE_API_KEY
 
 # --- Canales de entrada ---
 channels:
