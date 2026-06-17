@@ -1,0 +1,34 @@
+# Unit de systemd para el gateway de Hermes.
+# Se copia al VPS como /etc/systemd/system/hermes-gateway.service
+# (ver pasos en deploy/install-notes.md).
+
+[Unit]
+Description=Hermes Agent gateway
+# Esperar a que haya red antes de arrancar.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Correr como usuario NO-root dedicado (requisito de seguridad, Fase 1).
+User=hermes
+Group=hermes
+WorkingDirectory=/home/hermes
+
+# Cargar los secrets desde el .env (chmod 600). El gateway los lee del entorno.
+EnvironmentFile=/home/hermes/.hermes/.env
+
+# IMPORTANTE: confirmar la ruta REAL del binario que dejó el instalador de Hermes
+# (p. ej. `which hermes` como usuario hermes) y ajustar ExecStart si difiere.
+ExecStart=/home/hermes/.hermes/bin/hermes gateway --config /home/hermes/.hermes/config.yaml
+
+# Reinicio automático ante fallos.
+Restart=on-failure
+RestartSec=5
+
+# Endurecimiento básico (no escala privilegios).
+NoNewPrivileges=true
+
+[Install]
+# Arranque automático al bootear el VPS.
+WantedBy=multi-user.target

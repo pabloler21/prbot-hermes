@@ -4,8 +4,8 @@ Notas de handoff entre fases. Se actualiza al cerrar cada fase.
 
 ## Estado actual
 
-- **Fase en curso:** Fase 0 — Bootstrap del repo de operaciones.
-- **Rama:** `feat/f0-bootstrap`.
+- **Fase en curso:** Fase 1 — Hermes vivo por Discord (artefactos construidos; validación pendiente del VPS).
+- **Rama:** `feat/f1-hermes-deploy`.
 
 ## Fase 0 — Bootstrap (en curso)
 
@@ -22,6 +22,19 @@ Entregado:
 - **Proveedor LLM:** OpenRouter. **Modelo:** `moonshotai/kimi-k2.6` (a fijar en `config.yaml`, Fase 1).
 - **Sandbox de Hermes:** backend `ssh` / host (Fase 1). Reevaluar Docker antes de las acciones sobre GitHub (Fase 3).
 - **VPS recomendado:** Oracle Cloud "Always Free" (ARM Ampere; fallback AMD x86 o GCP `e2-micro`).
+
+## Fase 1 — Hermes deploy (artefactos construidos, validación pendiente)
+
+Entregado (no requiere VPS):
+- `config/hermes/config.yaml`: OpenRouter + `moonshotai/kimi-k2.6`, Discord + allowlist,
+  `approvals.mode: manual` + `cron_mode: deny`, sandbox `ssh`, `terminal.cwd` seguro.
+- `deploy/systemd/hermes-gateway.service`: usuario no-root, restart on-failure, arranque automático.
+- `deploy/install-notes.md`: pasos completos de despliegue + checklist de validación.
+- `docs/adr/ADR-0002-hermes-deploy.md` (estado: propuesto, se confirma al validar en el VPS).
+
+Pendiente de validación (requiere VPS): que el bot responda/deniegue y sobreviva reboot.
+Hay supuestos a reconciliar en el VPS: nombres de campos del `config.yaml` y ruta del
+binario en `ExecStart` (ver ADR-0002 e install-notes.md, paso 6).
 
 ## Pasos manuales PENDIENTES (humano)
 

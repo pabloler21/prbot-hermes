@@ -1,0 +1,52 @@
+# Configuración de Hermes Agent — Fase 1.
+# Objetivo de esta fase: gateway vivo por Discord, SIN acciones sobre GitHub todavía.
+#
+# Este archivo se copia al VPS como ~/.hermes/config.yaml.
+# Los SECRETS no van acá: se referencian por nombre desde ~/.hermes/.env
+# (ver deploy/.env.example y deploy/install-notes.md).
+#
+# IMPORTANTE (ver ADR-0002): los NOMBRES de campos de abajo siguen los conceptos
+# documentados de Hermes, pero deben validarse contra el config.yaml que genera el
+# instalador y la doc oficial (https://hermes-agent.nousresearch.com/docs).
+# Si algún nombre difiere, ajustarlo y dejar constancia en el ADR.
+
+# --- Proveedor de LLM ---
+llm:
+  provider: openrouter
+  model: moonshotai/kimi-k2.6
+  # La API key se lee del entorno (cargado desde ~/.hermes/.env), no se escribe acá.
+  api_key_env: OPENROUTER_API_KEY
+
+# --- Canales de entrada ---
+channels:
+  discord:
+    enabled: true
+    # Token del bot, tomado del entorno.
+    token_env: DISCORD_BOT_TOKEN
+    # Allowlist explícita de usuarios autorizados (IDs separados por coma en el .env).
+    # Sin allowlist, Hermes deniega a todos. Sin allow-all.
+    allowed_users_env: DISCORD_ALLOWED_USERS
+
+# --- Aprobaciones (postura segura por defecto, fail-closed) ---
+approvals:
+  # manual = todo comando de shell PELIGROSO requiere aprobación yes/no por Discord.
+  mode: manual
+  # En ejecuciones por cron, denegar por defecto en modo headless.
+  cron_mode: deny
+
+# --- Sandbox de ejecución ---
+sandbox:
+  # Backend ssh/host (decisión de Fase 1, ADR-0002).
+  # Reevaluar 'docker' antes de habilitar acciones sobre GitHub (Fase 3).
+  backend: ssh
+
+# --- Terminal ---
+terminal:
+  # Directorio de trabajo del agente. NO un directorio sensible.
+  # Debe existir y ser propiedad del usuario 'hermes' (ver install-notes.md).
+  cwd: /home/hermes/work
+
+# --- MCP servers ---
+# Vacío en Fase 1. El servidor MCP de GitHub se agrega en Fase 3
+# (mcp_servers.github con el PAT pasado por 'env').
+# mcp_servers: {}
