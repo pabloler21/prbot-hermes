@@ -4,9 +4,9 @@ Notas de handoff entre fases. Se actualiza al cerrar cada fase.
 
 ## Estado actual
 
-- **Fase en curso:** Fase 2 — Redis + BullMQ base.
-- **Rama activa:** `feat/f2-bullmq-base` (por crear).
-- **Rama anterior:** `feat/f1-hermes-deploy` (pendiente de mergear a `main`).
+- **Fase en curso:** Fase 3 — MVP end-to-end (GitHub MCP + approval gate + worker post-comment).
+- **Rama activa:** `feat/f3-github-mvp` (por crear).
+- **Rama anterior:** `feat/f2-n8n-inventory` (pendiente de mergear a `main`).
 
 ## Fase 0 — Bootstrap (completa)
 
@@ -39,13 +39,25 @@ Decisiones reconciliadas:
 - Ruta del binario: `/home/hermes/.hermes/hermes-agent/venv/bin/hermes`.
 - VPS: Oracle Cloud Always Free, VM.Standard.E2.1.Micro (AMD x86), IP `137.131.202.213`.
 
+## Fase 2 — Inventario n8n y mapa de migración (completa, 2026-06-18)
+
+Entregado:
+- `docs/n8n-inventory.md`: 5 workflows inventariados con trigger, acción, salida,
+  frecuencia y criticidad. Todos asignados a BullMQ schedulers. PR Assistant (nuevo)
+  asignado a Hermes agéntico en Fase 5.
+- `docs/adr/ADR-0003-migration-map.md`: decisiones de clasificación, criterio de
+  cutover (7 días sin errores en producción) y tabla de workers por workflow.
+
 ## Decisiones ya tomadas (para fases siguientes)
 
 - **Sandbox de Hermes:** backend `ssh` / host (Fase 1). Reevaluar Docker antes de las
   acciones sobre GitHub (Fase 3).
-- **Worker language (Fase 4):** por decidir. Ver ADR-0005 cuando llegue.
+- **Worker language:** por decidir en Fase 4 (ADR-0005). Estructura agnóstica hasta entonces.
+- **Sin webhooks:** PAT es read-only, sin permisos de admin. Alertas via poll cada 5 min.
+- **Idempotencia:** obligatoria en todos los workers de poll desde el inicio.
 
 ## Próxima fase
 
-- **Fase 2** — Redis + BullMQ base: instalar Redis en el VPS (bind local, con password),
-  crear la estructura de colas/workers en el repo, smoke test con un job de prueba.
+- **Fase 3** — MVP end-to-end: conectar GitHub MCP, allowlist de repos, approval gate
+  de publicación en BullMQ, worker `post-comment` con idempotencia.
+  Pasos manuales previos: generar PAT de GitHub (read + comments) y definir allowlist.
