@@ -6,7 +6,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Operations repo (`team-agent-ops`) for **deploying and configuring Hermes Agent (Nous Research)** on an Ubuntu VPS, wiring it to GitHub (via MCP) and Discord, running durable work through **BullMQ + Redis**, and **migrating an existing n8n bot** onto it before retiring n8n.
 
-Hermes is operated as a dependency — **do not fork it**. What gets versioned here is the configuration (`config.yaml`), the business guardrails, and the BullMQ queues/workers. The current state of the repo is the plan only: `plan-1-agente-hermes.md` is the authoritative, phase-by-phase execution plan. Read it before acting.
+Hermes is operated as a dependency — **do not fork it**. What gets versioned here is the configuration, the business guardrails, and the BullMQ queues/workers. `plan-1-agente-hermes.md` is the authoritative, phase-by-phase execution plan. Read it before acting.
+
+## Current state (updated 2026-06-19)
+
+- **Phase 0 (bootstrap):** ✅ complete, merged to `main`.
+- **Phase 1 (Hermes live on Discord):** ✅ complete, validated on VPS, merged to `main`.
+- **Phase 2 (n8n inventory + migration map):** ✅ complete, merged to `main`. Inventory is *invented* (realistic team workflows) — the user has no real n8n access; we build the migration as if real for a portfolio/demo. See `docs/n8n-inventory.md`.
+- **Phase 3a (GitHub MCP, read-only):** ✅ complete, validated. On branch `feat/f3-github-mvp` (NOT yet merged — Phase 3 closes only when 3b is done).
+- **Phase 3b (write path: approval-gated BullMQ worker):** ⏳ blocked on Redis (manual install, Phase 4).
+
+**VPS:** Oracle Cloud Always Free, VM.Standard.E2.1.Micro (AMD x86, 1GB RAM), Ubuntu 22.04, IP `137.131.202.213`. Connect: `ssh ubuntu@137.131.202.213`. Hermes runs as user `hermes`; binary at `/home/hermes/.hermes/hermes-agent/venv/bin/hermes`. Operator cheatsheet: `CHEATSHEET.md` (gitignored, personal).
+
+**Demo thesis:** Hermes on Discord answers the team's questions about code/PRs/CI-failures (reads GitHub via MCP); BullMQ+Redis runs recurring work and approval-gated GitHub writes (digests, alerts, comments), replacing n8n.
 
 ## Operating rules (from the plan — these are binding)
 
@@ -57,15 +69,17 @@ scripts/
 ## Open decisions to record when reached (do not pre-decide)
 
 - **Worker language (Phase 4):** TypeScript (mature reference SDK) vs Python (homogeneous with repo tooling). Decide with rationale, record in ADR-0005. The structure stays language-agnostic until then.
-- **Concrete LLM model (Phase 1):** provider is OpenRouter (key in `~/.hermes/.env`); pin the specific model in Phase 1.
+
+## Decisions already made (do not re-litigate)
+
+- **LLM:** provider **OpenCode** (user's Go subscription), model **`kimi-k2.7-code`**. Key in `~/.hermes/.env` as `OPENCODE_API_KEY`. OpenRouter was discarded (ADR-0002).
 
 ## Confirmed facts about Hermes (do not re-verify)
 
-Confirmed against `https://hermes-agent.nousresearch.com/docs`:
+Confirmed against the docs and **reconciled against the real install on the VPS**:
 - Headless VPS install via `curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash`.
-- GitHub via the `@modelcontextprotocol/server-github` MCP server; PAT passed through the `env` of the `mcp_servers` block in `~/.hermes/config.yaml`. Hermes filters the MCP subprocess environment to only what's declared in `env`.
-- OpenRouter is natively supported.
-- Discord channel supported, with a user allowlist (`DISCORD_ALLOWED_USERS`) and native yes/no approval buttons. Without an allowlist Hermes denies everyone.
-- Native cron with delivery to any platform; `approvals.cron_mode` (deny|approve) for headless behavior.
-- Sandbox backends `ssh` and `docker` (in `docker`, dangerous-command checks are skipped because the container is the security boundary).
-- `approvals.mode` (manual|smart|off) — covers dangerous shell commands only.
+- **MCP servers are managed via the `hermes mcp` CLI (`add`/`configure`/`list`/`catalog`), NOT a `mcp_servers` block in `config.yaml`.** (The earlier assumption of a config.yaml block was WRONG — corrected in ADR-0004.) The PAT is passed as an env reference `--env GITHUB_PERSONAL_ACCESS_TOKEN='${GITHUB_PAT}'`; Hermes resolves `${GITHUB_PAT}` at runtime from `~/.hermes/.env` (verified), so the secret is never hardcoded. The GitHub MCP (`@modelcontextprotocol/server-github`) exposes 26 tools; **we locked it to 14 read-only tools** via `hermes mcp configure` (12 write tools disabled) so the only publish path is the approval-gated worker.
+- The real generated config uses top-level keys `model:`, `discord:`, `approvals:`, `terminal:` (NOT `llm:`/`channels:`). The repo's `config/hermes/config.yaml` is an intent/doc artifact, not the live file — do not overwrite the installer-generated `~/.hermes/config.yaml` wholesale; edit deltas only.
+- Discord: user allowlist via `DISCORD_ALLOWED_USERS`; native yes/no approval buttons. Without an allowlist Hermes denies everyone. Privileged Gateway Intents (Presence, Server Members, Message Content) must be enabled manually in the Discord Developer Portal.
+- systemd unit needs `TimeoutStopSec>=210` (Hermes `restart_drain_timeout` is 180s; the 90s default SIGKILLs mid-drain).
+- Native cron with `approvals.cron_mode` (deny|approve); sandbox backends `ssh`/`docker`; `approvals.mode` (manual|smart|off) covers dangerous shell commands only (NOT MCP actions).
