@@ -4,9 +4,27 @@ Notas de handoff entre fases. Se actualiza al cerrar cada fase.
 
 ## Estado actual
 
-- **Fase en curso:** Fase 3 — MVP end-to-end (GitHub MCP + approval gate + worker post-comment).
-- **Rama activa:** `feat/f3-github-mvp` (por crear).
-- **Rama anterior:** `feat/f2-n8n-inventory` (pendiente de mergear a `main`).
+- **Fase en curso:** Fase 3 — MVP end-to-end. **3a (lectura) completo y validado;
+  3b (escritura: worker + approval gate) pendiente de Redis.**
+- **Rama activa:** `feat/f3-github-mvp`.
+
+### Fase 3a — GitHub MCP solo-lectura (completo, validado 2026-06-19)
+
+- MCP de GitHub conectado vía CLI `hermes mcp add` (NO por bloque `mcp_servers` del
+  config — ese supuesto de ADR-0002 era incorrecto; corregido en ADR-0004).
+- PAT cargado en `~/.hermes/.env` como `GITHUB_PAT`, referenciado como `${GITHUB_PAT}`
+  (no hardcodeado). PAT scopeado: read + PR/issue comments + actions:read; sin merge/push.
+- MCP en SOLO-LECTURA: 14 tools de lectura activas, 12 de escritura desactivadas con
+  `hermes mcp configure`. Hermes no puede publicar directamente — solo leer.
+- Validado: Hermes leyó `CLAUDE.md` del repo desde Discord (`get_file_contents`).
+- `config/guardrails/repo-allowlist.yaml` creado (`pabloler21/prbot-hermes`); se aplicará
+  en el worker en 3b.
+
+### Fase 3b — escritura con approval gate (PENDIENTE)
+
+Bloqueado por: **Redis no instalado** (paso manual de Fase 4). El camino de escritura
+(worker BullMQ `post-comment` + estado `pending-approval` + aprobación por Discord +
+idempotencia + validación de allowlist en el worker) se construye cuando haya Redis.
 
 ## Fase 0 — Bootstrap (completa)
 

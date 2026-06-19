@@ -129,3 +129,45 @@ journalctl -u hermes-gateway -f            # logs en vivo
 - [ ] `~/.hermes/.env` con `chmod 600`.
 
 Cuando todo pase: actualizar `HANDOFF.md`, confirmar ADR-0002 y mergear la fase a `main`.
+
+---
+
+## 8. Conectar el MCP de GitHub — solo lectura (Fase 3a)
+
+> **PASO MANUAL (humano):** generar el PAT de GitHub (fine-grained), scopeado a:
+> Contents=read, Pull requests=read/write, Issues=read/write, Metadata=read,
+> Actions=read. **Sin** Administration ni Workflows:write (sin merge/push/force-push).
+> Cargarlo en `~/.hermes/.env` como `GITHUB_PAT` (chmod 600).
+
+El MCP **no** se declara en `config.yaml`: se gestiona con el CLI `hermes mcp`.
+
+```bash
+# Como usuario hermes:
+sudo su - hermes
+
+# Agregar el MCP de GitHub. Comillas SIMPLES en el env para guardar la referencia
+# literal ${GITHUB_PAT} (Hermes la resuelve en runtime desde ~/.hermes/.env; el
+# token NO queda hardcodeado en la config del MCP).
+hermes mcp add github --command npx \
+  --env GITHUB_PERSONAL_ACCESS_TOKEN='${GITHUB_PAT}' \
+  --args -y @modelcontextprotocol/server-github
+
+# GUARDRAIL: dejar el MCP en SOLO-LECTURA. Lanza un selector interactivo.
+# Responder 'select' y DESACTIVAR (SPACE) las 12 tools de escritura:
+#   create_or_update_file, create_repository, push_files, create_issue,
+#   create_pull_request, fork_repository, create_branch, update_issue,
+#   add_issue_comment, create_pull_request_review, merge_pull_request,
+#   update_pull_request_branch
+# Dejar tildadas SOLO las 14 de lectura. ENTER para confirmar.
+hermes mcp configure github
+
+# Verificar: debe decir "14 selected · enabled".
+hermes mcp list
+
+# Reiniciar el gateway para tomar los cambios (como ubuntu).
+exit
+sudo systemctl restart hermes-gateway
+```
+
+**Validación (3a):** desde Discord, pedirle a Hermes que lea un archivo del repo
+(p. ej. `get_file_contents` sobre `CLAUDE.md`). Debe devolver el contenido real.

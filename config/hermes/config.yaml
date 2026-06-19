@@ -48,6 +48,17 @@ terminal:
   cwd: /home/hermes/work
 
 # --- MCP servers ---
-# Vacío en Fase 1. El servidor MCP de GitHub se agrega en Fase 3
-# (mcp_servers.github con el PAT pasado por 'env').
-# mcp_servers: {}
+# RECONCILIADO en Fase 3 (ver ADR-0004): Hermes NO declara los MCP en un bloque
+# 'mcp_servers' de este YAML. Se gestionan con el CLI `hermes mcp` y se guardan
+# en el estado interno de Hermes. El comando que dejamos versionado en
+# deploy/install-notes.md (paso de Fase 3) es:
+#
+#   hermes mcp add github --command npx \
+#     --env GITHUB_PERSONAL_ACCESS_TOKEN='${GITHUB_PAT}' \
+#     --args -y @modelcontextprotocol/server-github
+#
+# - El PAT NO se hardcodea: se guarda la referencia literal ${GITHUB_PAT} y
+#   Hermes la resuelve en runtime desde ~/.hermes/.env.
+# - GUARDRAIL: el MCP se deja en SOLO-LECTURA con `hermes mcp configure github`
+#   (14 tools de lectura; las 12 de escritura desactivadas). El único camino
+#   para publicar en GitHub es el worker de BullMQ con approval gate (Fase 3b).

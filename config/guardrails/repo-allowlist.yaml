@@ -1,0 +1,15 @@
+# Allowlist de repositorios — guardrail de negocio (Fase 3).
+#
+# Hermes solo puede ACTUAR (comentar, etc.) sobre los repos de esta lista.
+# Esta validación se aplica en el WORKER de BullMQ (capa determinística),
+# NO en el LLM: a qué repo se puede escribir es una decisión de código, no
+# del modelo. Aunque Hermes "decida" actuar sobre un repo fuera de la lista,
+# el worker lo rechaza antes de tocar GitHub.
+#
+# Formato: owner/repo, uno por línea.
+
+allowed_repos:
+  - pabloler21/prbot-hermes
+
+# Para agregar un repo: sumar la línea acá, commitear, y redeployar el worker.
+# Nunca dar allow-all. Cada repo es una decisión explícita y versionada.
