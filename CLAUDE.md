@@ -8,15 +8,16 @@ Operations repo (`team-agent-ops`) for **deploying and configuring Hermes Agent 
 
 Hermes is operated as a dependency — **do not fork it**. What gets versioned here is the configuration, the business guardrails, and the BullMQ queues/workers. `plan-1-agente-hermes.md` is the authoritative, phase-by-phase execution plan. Read it before acting.
 
-## Current state (updated 2026-06-19)
+## Current state (updated 2026-06-21)
 
 - **Phase 0 (bootstrap):** ✅ complete, merged to `main`.
 - **Phase 1 (Hermes live on Discord):** ✅ complete, validated on VPS, merged to `main`.
 - **Phase 2 (n8n inventory + migration map):** ✅ complete, merged to `main`. Inventory is *invented* (realistic team workflows) — the user has no real n8n access; we build the migration as if real for a portfolio/demo. See `docs/n8n-inventory.md`.
 - **Phase 3a (GitHub MCP, read-only):** ✅ complete, validated. On branch `feat/f3-github-mvp` (NOT yet merged — Phase 3 closes only when 3b is done).
-- **Phase 3b (write path: approval-gated BullMQ worker):** ⏳ blocked on Redis (manual install, Phase 4).
+- **Redis (3b prerequisite):** ✅ installed and secured on the VPS (manual step, 2026-06-21). Bound to `127.0.0.1` + `::1` only (not internet-facing), `requirepass` set, `REDIS_URL` loaded in `~/.hermes/.env` (chmod 600). Verified: `redis-cli -u "$REDIS_URL" ping` → `PONG`.
+- **Phase 3b (write path: approval-gated BullMQ worker):** ⏳ NOW UNBLOCKED — next up: build the `post-comment` worker (pending-approval state, Discord yes/no approval, idempotency, repo-allowlist check in the worker).
 
-**VPS:** Oracle Cloud Always Free, VM.Standard.E2.1.Micro (AMD x86, 1GB RAM), Ubuntu 22.04, IP `137.131.202.213`. Connect: `ssh ubuntu@137.131.202.213`. Hermes runs as user `hermes`; binary at `/home/hermes/.hermes/hermes-agent/venv/bin/hermes`. Operator cheatsheet: `CHEATSHEET.md` (gitignored, personal).
+**VPS:** Oracle Cloud Always Free, VM.Standard.E2.1.Micro (AMD x86, 1GB RAM), Ubuntu 22.04, IP `137.131.202.213`. Connect: `ssh ubuntu@137.131.202.213`. Hermes runs as user `hermes`; binary at `/home/hermes/.hermes/hermes-agent/venv/bin/hermes`. Redis runs locally (127.0.0.1:6379, password-protected). Operator cheatsheet: `CHEATSHEET.md` (gitignored, personal).
 
 **Demo thesis:** Hermes on Discord answers the team's questions about code/PRs/CI-failures (reads GitHub via MCP); BullMQ+Redis runs recurring work and approval-gated GitHub writes (digests, alerts, comments), replacing n8n.
 

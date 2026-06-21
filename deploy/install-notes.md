@@ -171,3 +171,51 @@ sudo systemctl restart hermes-gateway
 
 **Validación (3a):** desde Discord, pedirle a Hermes que lea un archivo del repo
 (p. ej. `get_file_contents` sobre `CLAUDE.md`). Debe devolver el contenido real.
+
+---
+
+## 9. Instalar y asegurar Redis (prerequisito de la Fase 3b)
+
+> **PASO MANUAL (humano).** Redis es el almacén que usa BullMQ para la cola de jobs.
+> Sin Redis no hay cola → no hay worker → no hay approval gate. Por eso es bloqueante
+> para 3b. El worker corre en la MISMA VPS, así que Redis NO necesita exponerse a
+> internet: lo dejamos escuchando solo en localhost + password (defensa en profundidad).
+
+```bash
+# Como ubuntu, instalar.
+sudo apt install redis-server
+
+# Asegurarlo: editar el config.
+sudo nano /etc/redis/redis.conf
+```
+
+En `redis.conf`, verificar/ajustar dos directivas (buscar con Ctrl+W):
+
+1. **`bind 127.0.0.1 ::1`** — solo localhost. El default de Ubuntu ya suele venir así;
+   NO usar `0.0.0.0` (eso lo expondría a internet en una IP pública = comprometido en horas).
+2. **`requirepass <clave>`** — descomentar y poner una clave fuerte. Generar con
+   `openssl rand -hex 32` (formato **hex**, no base64: hex es URL-safe y no rompe el
+   `REDIS_URL`; base64 trae `+` `/` `=` que tienen significado especial en una URL).
+
+```bash
+# Aplicar y verificar.
+sudo systemctl restart redis-server
+redis-cli ping                      # esperado: (error) NOAUTH Authentication required.
+redis-cli -a '<clave>' ping         # esperado: PONG
+```
+
+Cargar la URL de conexión en el `.env` de Hermes (como usuario `hermes`):
+
+```bash
+sudo su - hermes
+nano ~/.hermes/.env
+#   añadir:  REDIS_URL=redis://:<clave>@127.0.0.1:6379
+#   (el ':' va solo, sin usuario: Redis con requirepass no usa username)
+chmod 600 ~/.hermes/.env
+
+# Verificar la URL completa de punta a punta (como la leerá BullMQ).
+redis-cli -u "$(grep REDIS_URL ~/.hermes/.env | cut -d= -f2-)" ping   # esperado: PONG
+```
+
+**Validación (Redis):** `redis-cli ping` sin clave da `NOAUTH`; con la URL del `.env`
+da `PONG`. Con eso, la Fase 3b queda desbloqueada.

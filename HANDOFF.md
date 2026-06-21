@@ -5,7 +5,8 @@ Notas de handoff entre fases. Se actualiza al cerrar cada fase.
 ## Estado actual
 
 - **Fase en curso:** Fase 3 — MVP end-to-end. **3a (lectura) completo y validado;
-  3b (escritura: worker + approval gate) pendiente de Redis.**
+  Redis instalado y asegurado; 3b (escritura: worker + approval gate) DESBLOQUEADA,
+  próximo trabajo.**
 - **Rama activa:** `feat/f3-github-mvp`.
 
 ### Fase 3a — GitHub MCP solo-lectura (completo, validado 2026-06-19)
@@ -20,11 +21,21 @@ Notas de handoff entre fases. Se actualiza al cerrar cada fase.
 - `config/guardrails/repo-allowlist.yaml` creado (`pabloler21/prbot-hermes`); se aplicará
   en el worker en 3b.
 
-### Fase 3b — escritura con approval gate (PENDIENTE)
+### Redis — prerequisito de 3b (completo, asegurado 2026-06-21)
 
-Bloqueado por: **Redis no instalado** (paso manual de Fase 4). El camino de escritura
-(worker BullMQ `post-comment` + estado `pending-approval` + aprobación por Discord +
-idempotencia + validación de allowlist en el worker) se construye cuando haya Redis.
+Paso manual hecho por el humano. Instalado con `apt install redis-server`. Asegurado:
+- `bind 127.0.0.1 ::1` (solo localhost — no expuesto a internet).
+- `requirepass` con clave aleatoria (`openssl rand -hex 32`, formato hex para que sea
+  URL-safe dentro del `REDIS_URL`).
+- `REDIS_URL=redis://:<clave>@127.0.0.1:6379` cargado en `~/.hermes/.env` (chmod 600).
+- Verificado: `redis-cli ping` → `NOAUTH` (sin clave); `redis-cli -u "$REDIS_URL" ping` → `PONG`.
+
+### Fase 3b — escritura con approval gate (DESBLOQUEADA, próximo trabajo)
+
+Con Redis listo, se construye el camino de escritura: worker BullMQ `post-comment` +
+estado `pending-approval` + aprobación yes/no por Discord + idempotencia (`repo+pr+content_hash`)
++ validación de allowlist de repos en el worker (capa determinística, no en el LLM).
+Decisión pendiente antes de codear: lenguaje del worker (TS vs Python) → ADR-0005.
 
 ## Fase 0 — Bootstrap (completa)
 
