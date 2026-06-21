@@ -1,7 +1,9 @@
-// Conexión compartida a Redis para BullMQ (la usan tanto los productores como
-// los workers). Centralizar la conexión acá evita abrir una por cada cola y nos
-// da un único lugar donde configurarla.
-import { Redis } from "ioredis";
+// Opciones de conexión a Redis para BullMQ.
+//
+// En vez de crear el cliente ioredis a mano, exportamos un OBJETO de opciones y
+// dejamos que BullMQ construya la conexión internamente. Esto evita el "dual
+// package hazard" (dos copias de ioredis en node_modules con tipos incompatibles)
+// y hace que BullMQ se encargue solo de los requisitos de conexión de los workers.
 
 // El secreto NO se hardcodea: se lee de REDIS_URL, que vive en ~/.hermes/.env
 // (chmod 600) en el VPS. En local podés exportarla en tu shell para probar.
@@ -16,16 +18,17 @@ if (!url) {
   );
 }
 
-// maxRetriesPerRequest: null es OBLIGATORIO para los workers de BullMQ.
-// Hace que ioredis reintente cada comando indefinidamente mientras Redis no esté
-// disponible, en vez de tirar error. Así el worker sobrevive a cortes de Redis y
-// sigue procesando cuando vuelve. Si NO se setea, BullMQ lanza una excepción.
-export const connection = new Redis(url, {
-  maxRetriesPerRequest: null,
-});
+// Parseamos la URL (redis://:password@host:port) en sus componentes.
+const parsed = new URL(url);
 
-// Si la conexión falla (URL mal, password mal, Redis caído), lo logueamos en vez
-// de dejar que el evento quede sin manejar.
-connection.on("error", (err: Error) => {
-  console.error("[redis] error de conexión:", err.message);
-});
+export const connectionOptions = {
+  host: parsed.hostname,
+  port: parsed.port ? Number(parsed.port) : 6379,
+  // Con requirepass no hay usuario; ioredis usa solo la password. decodeURIComponent
+  // por si la password trae caracteres escapados en la URL.
+  username: parsed.username ? decodeURIComponent(parsed.username) : undefined,
+  password: parsed.password ? decodeURIComponent(parsed.password) : undefined,
+  // Obligatorio para los workers de BullMQ: reintentar cada comando para siempre
+  // mientras Redis no esté disponible, en vez de tirar error. Inofensivo para la cola.
+  maxRetriesPerRequest: null,
+};

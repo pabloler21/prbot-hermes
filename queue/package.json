@@ -13,8 +13,7 @@
     "worker:post-comment": "tsx workers/post-comment.worker.ts"
   },
   "dependencies": {
-    "bullmq": "^5.79.0",
-    "ioredis": "^5.11.1"
+    "bullmq": "^5.79.0"
   },
   "devDependencies": {
     "@types/node": "^26.0.0",
