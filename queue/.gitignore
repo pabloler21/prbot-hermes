@@ -1,0 +1,6 @@
+# Dependencias instaladas (se reconstruyen con `npm install`).
+node_modules/
+
+# Salida de compilación de TypeScript.
+dist/
+*.tsbuildinfo
