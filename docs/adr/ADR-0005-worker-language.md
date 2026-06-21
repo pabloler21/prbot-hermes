@@ -1,6 +1,6 @@
 # ADR-0005 — Lenguaje de los workers de BullMQ: TypeScript
 
-- **Estado:** aceptado
+- **Estado:** REEMPLAZADO por ADR-0006 (ver nota al final)
 - **Fase:** 3b (decisión que el plan ubicaba en Fase 4; se adelanta porque 3b ya
   necesita escribir el primer worker)
 - **Fecha:** 2026-06-21
@@ -76,3 +76,11 @@ Una primera evaluación en este proyecto recomendó TS con un fundamento equivoc
 ("Python es un port inmaduro de terceros" — falso: es oficial). Esta decisión corrige
 el fundamento: la razón real y verificada es la falta de schedulers/retries/events en el
 port Python, no su origen. Se documenta para no repetir el prejuicio.
+
+## REEMPLAZADO por ADR-0006
+
+Esta decisión optimizó el criterio equivocado ("mejor herramienta técnica para una
+cola") e ignoró el criterio que realmente manda en un proyecto de portfolio: que el
+autor pueda **defenderlo en su stack (Python)**, más la restricción de **1GB de RAM /
+gratis** del VPS. ADR-0006 revierte a Python con `arq`. Se conserva este ADR como
+registro del razonamiento y de la corrección.
