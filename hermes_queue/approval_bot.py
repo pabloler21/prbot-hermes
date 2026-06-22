@@ -101,9 +101,7 @@ class ApprovalView(discord.ui.View):
             )
             return
         if result:
-            await interaction.edit_original_response(
-                content=f"✅ Comentario posteado: {result}"
-            )
+            await interaction.edit_original_response(content=f"✅ Comentario posteado: {result}")
         else:
             await interaction.edit_original_response(
                 content="⚠️ El worker rechazó el pedido (allowlist o error). Ver logs."
