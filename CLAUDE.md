@@ -17,7 +17,7 @@ Hermes is operated as a dependency — **do not fork it**. What gets versioned h
 - **Phase 2 (n8n inventory + migration map):** ✅ complete, merged to `main`. Inventory is *invented* (realistic team workflows) — the author has no real n8n access; we build the migration as if real for a portfolio/demo. See `docs/n8n-inventory.md`.
 - **Phase 3a (GitHub MCP, read-only):** ✅ complete, validated. On branch `feat/f3-github-mvp` (NOT yet merged — Phase 3 closes only when 3b is done).
 - **Redis (3b prerequisite):** ✅ installed and secured on the VPS (manual step). Bound to `127.0.0.1` + `::1` only (not internet-facing), `requirepass` set, `REDIS_URL` loaded in `~/.hermes/.env` (chmod 600). Verified: `redis-cli -u "$REDIS_URL" ping` → `PONG`.
-- **Phase 3b (write path: approval-gated worker):** ⏳ IN PROGRESS, on `feat/f3-github-mvp`. The queue layer is **Python + arq** (ADR-0006, supersedes ADR-0005). Built so far in `hermes_queue/`: Redis settings (`settings.py`), the post-comment data type + idempotency, and the approval gate (`jobs/post_comment.py`: `enqueue_pending`/`approve`/`reject`, Enfoque B). **Next:** the worker (`workers/post_comment_worker.py`) — allowlist validation + GitHub comment POST + `WorkerSettings`; then the Discord bridge (yes/no buttons → approve/reject).
+- **Phase 3b (write path: approval-gated worker):** ✅ COMPLETE, validated end-to-end on the VPS (2026-06-22). On `feat/f3-github-mvp` (PR #1, ready to merge). Queue layer is **Python + arq** (ADR-0006, supersedes ADR-0005), in `hermes_queue/`: `settings.py`, `jobs/post_comment.py` (producer + approval gate Enfoque B), `guardrails.py` (allowlist), `github_client.py`, `events.py` (pub/sub), `workers/post_comment_worker.py`, `mcp_server.py` (Hermes tool `propose_pr_comment`), `approval_bot.py` (Discord ✅/❌ bot). Runs as systemd units `hermes-arq-worker` + `hermes-approval-bot`. Validated flow: user (DM) → Hermes → MCP tool → pending → approval bot → approve → worker posts to GitHub. **Known minor follow-up:** Hermes only replies in DM, not the server channel (home-channel quirk, not blocking).
 
 **VPS:** Oracle Cloud Always Free, VM.Standard.E2.1.Micro (AMD x86, **1GB RAM** — resource-constrained, factor this into every choice), Ubuntu 22.04, IP `137.131.202.213`. Connect: `ssh ubuntu@137.131.202.213`. Hermes runs as user `hermes`; binary at `/home/hermes/.hermes/hermes-agent/venv/bin/hermes`. Redis runs locally (127.0.0.1:6379, password-protected). Operator cheatsheet: `CHEATSHEET.md` (gitignored, personal).
 
@@ -72,7 +72,7 @@ scripts/
 ## Decisions already made (do not re-litigate)
 
 - **Worker/queue language:** **Python + arq** (ADR-0006, supersedes ADR-0005). Chosen for defensibility in the author's stack and the 1GB free VPS (arq is async, Redis-native, tiny footprint, with native cron/retries/idempotency). BullMQ/TypeScript was discarded; the Python package is named `hermes_queue` (not `queue`) to avoid shadowing the stdlib `queue` module.
-- **LLM:** provider **OpenCode** (user's Go subscription), model **`kimi-k2.7-code`**. Key in `~/.hermes/.env` as `OPENCODE_API_KEY`. OpenRouter was discarded (ADR-0002).
+- **LLM:** provider **OpenCode** (user's Go subscription), model **`kimi-k2.7-code`**. Key in `~/.hermes/.env` as `OPENCODE_GO_API_KEY`. OpenRouter was discarded (ADR-0002).
 
 ## Confirmed facts about Hermes (do not re-verify)
 

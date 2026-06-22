@@ -1,8 +1,8 @@
 # ADR-0004 — Guardrails de GitHub: MCP solo-lectura + allowlist de repos (Fase 3)
 
-- **Estado:** parcial (3a confirmado; 3b — worker + approval gate — pendiente de Redis)
+- **Estado:** confirmado (3a + 3b validados end-to-end en el VPS, 2026-06-22)
 - **Fase:** 3
-- **Fecha:** 2026-06-19
+- **Fecha:** 2026-06-19 (3b validado 2026-06-22)
 
 ## Contexto
 
@@ -12,8 +12,8 @@ incorrecto en un PR real cuesta confianza, así que los frenos van primero.
 
 Esta fase se divide en dos sub-etapas por una dependencia de infraestructura:
 - **3a (esta entrega):** Hermes LEE GitHub vía MCP, en modo solo-lectura.
-- **3b (pendiente):** el camino de ESCRITURA (worker BullMQ + approval gate), que
-  requiere Redis instalado (paso manual de la Fase 4).
+- **3b (entregado):** el camino de ESCRITURA (worker **arq/Python** + approval gate; el
+  lenguaje se decidió en ADR-0006, que supersede el supuesto BullMQ). Requirió Redis.
 
 ## Decisiones
 
@@ -67,9 +67,10 @@ queda definida para 3b.)
 - [x] (3a) Hermes lee un archivo del repo vía MCP desde Discord (`get_file_contents` sobre `CLAUDE.md`).
 - [x] (3a) MCP confirmado en solo-lectura (`hermes mcp list` → "14 selected").
 - [x] (3a) El PAT no quedó hardcodeado (referencia `${GITHUB_PAT}` resuelta en runtime).
-- [ ] (3b) Acción sobre repo fuera de la allowlist: rechazada por el worker.
-- [ ] (3b) Ningún comentario se postea sin aprobación por Discord.
-- [ ] (3b) Reintentar el mismo job no duplica el comentario (idempotencia).
+- [x] (3b) Acción sobre repo fuera de la allowlist: rechazada por el worker (validado 2026-06-22).
+- [x] (3b) Ningún comentario se postea sin aprobación por Discord (botones ✅/❌ deterministas, restringidos a la allowlist de usuarios).
+- [x] (3b) Reintentar el mismo job no duplica el comentario (idempotencia por `_job_id` = sha256(repo+pr+body)).
+- [x] (3b) End-to-end: usuario (DM) → Hermes (tool MCP `propose_pr_comment`) → cola arq → aprobación → comentario en GitHub.
 
 ## Consecuencias
 
