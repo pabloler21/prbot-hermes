@@ -219,3 +219,74 @@ redis-cli -u "$(grep REDIS_URL ~/.hermes/.env | cut -d= -f2-)" ping   # esperado
 
 **Validación (Redis):** `redis-cli ping` sin clave da `NOAUTH`; con la URL del `.env`
 da `PONG`. Con eso, la Fase 3b queda desbloqueada.
+
+---
+
+## 10. Desplegar la capa de cola (Fase 3b: arq worker + MCP + bot de aprobación)
+
+Arquitectura del flujo: usuario en Discord → **Hermes** llama la tool MCP
+`propose_pr_comment` → encola un pendiente y publica un aviso (pub/sub) → el **bot de
+aprobación** muestra botones ✅/❌ → al aprobar, pasa a la cola → el **arq worker** valida
+la allowlist y postea en GitHub → el bot reporta el resultado.
+
+> **PASOS MANUALES (humano):**
+> - Crear el SEGUNDO bot de Discord ("APPROVAL_BOT"), invitarlo al server, copiar su token.
+> - Cargar en `~/.hermes/.env` (chmod 600): `DISCORD_APPROVAL_BOT_TOKEN`,
+>   `DISCORD_APPROVAL_CHANNEL_ID` (ID del canal de aprobaciones).
+
+### 10.1 Traer el repo al VPS e instalar dependencias (como usuario `hermes`)
+
+```bash
+sudo su - hermes
+
+# uv para el usuario hermes (si no lo tiene):
+command -v uv || curl -LsSf https://astral.sh/uv/install.sh | sh
+#   reabrir la shell o: source ~/.local/bin/env
+
+# Clonar el repo y la rama de la fase.
+git clone https://github.com/pabloler21/prbot-hermes.git ~/prbot-hermes
+cd ~/prbot-hermes && git checkout feat/f3-github-mvp
+
+# Crear el venv con todas las deps (arq, discord.py, mcp, httpx, pyyaml).
+uv sync
+```
+
+### 10.2 Registrar el MCP en Hermes
+
+El MCP necesita encontrar el paquete `hermes_queue`, por eso se pasa `PYTHONPATH`.
+
+```bash
+hermes mcp add hermes-queue \
+  --command /home/hermes/prbot-hermes/.venv/bin/python \
+  --env PYTHONPATH='/home/hermes/prbot-hermes' \
+  --env REDIS_URL='${REDIS_URL}' \
+  --args -m hermes_queue.mcp_server
+
+hermes mcp list   # debe aparecer hermes-queue
+sudo systemctl restart hermes-gateway
+```
+
+### 10.3 Instalar y arrancar los servicios (como `ubuntu`/root)
+
+```bash
+sudo cp ~hermes/prbot-hermes/deploy/systemd/hermes-arq-worker.service /etc/systemd/system/
+sudo cp ~hermes/prbot-hermes/deploy/systemd/hermes-approval-bot.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now hermes-arq-worker hermes-approval-bot
+sudo systemctl status hermes-arq-worker hermes-approval-bot   # ambos active (running)
+```
+
+### 10.4 Validar (checklist de cierre de la Fase 3b — ADR-0004)
+
+- [ ] Pedido sobre un repo **fuera de la allowlist** → el worker lo rechaza (ver
+      `journalctl -u hermes-arq-worker`), no se postea.
+- [ ] Ningún comentario se postea **sin aprobar** por Discord (rechazar → nada).
+- [ ] **Idempotencia:** el mismo pedido no duplica el comentario.
+- [ ] End-to-end: pedirle a Hermes comentar en un PR del repo permitido → aprobar →
+      el comentario aparece en GitHub y el bot reporta la URL.
+
+### 10.5 Puntos a vigilar (incertidumbres conocidas)
+
+- `uv` puede no estar en el PATH del usuario `hermes`: usar rutas absolutas o `source`.
+- Si Hermes no encuentra `hermes_queue` al spawnear el MCP, revisar el `PYTHONPATH`.
+- Si systemd no parsea bien el `.env`, mirar `journalctl -u hermes-arq-worker`.
