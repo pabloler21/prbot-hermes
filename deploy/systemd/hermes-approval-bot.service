@@ -1,0 +1,28 @@
+# Bot de Discord que opera el approval gate (botones ✅/❌).
+# Corre como el usuario 'hermes', comparte ~/.hermes/.env
+# (REDIS_URL, DISCORD_APPROVAL_BOT_TOKEN, DISCORD_APPROVAL_CHANNEL_ID, DISCORD_ALLOWED_USERS).
+#
+# Ajustar las rutas si clonás el repo en otro lugar.
+# Instalar:
+#   sudo cp deploy/systemd/hermes-approval-bot.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now hermes-approval-bot
+
+[Unit]
+Description=Hermes Discord approval bot
+After=network-online.target redis-server.service
+Wants=network-online.target
+Requires=redis-server.service
+
+[Service]
+Type=simple
+User=hermes
+Group=hermes
+WorkingDirectory=/home/hermes/prbot-hermes
+EnvironmentFile=/home/hermes/.hermes/.env
+ExecStart=/home/hermes/prbot-hermes/.venv/bin/python -m hermes_queue.approval_bot
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

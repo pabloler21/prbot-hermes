@@ -1,0 +1,27 @@
+# Worker de arq que ejecuta los pedidos APROBADOS (post-comment).
+# Corre como el usuario 'hermes', comparte ~/.hermes/.env (REDIS_URL, GITHUB_PAT).
+#
+# Ajustar las rutas si clonás el repo en otro lugar.
+# Instalar:
+#   sudo cp deploy/systemd/hermes-arq-worker.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now hermes-arq-worker
+
+[Unit]
+Description=Hermes arq worker (post-comment)
+After=network-online.target redis-server.service
+Wants=network-online.target
+Requires=redis-server.service
+
+[Service]
+Type=simple
+User=hermes
+Group=hermes
+WorkingDirectory=/home/hermes/prbot-hermes
+EnvironmentFile=/home/hermes/.hermes/.env
+ExecStart=/home/hermes/prbot-hermes/.venv/bin/arq hermes_queue.workers.post_comment_worker.WorkerSettings
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
