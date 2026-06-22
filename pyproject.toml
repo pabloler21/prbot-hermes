@@ -5,6 +5,8 @@ description = "Operations repo for Hermes Agent + arq task queue and n8n migrati
 requires-python = ">=3.11"
 dependencies = [
     "arq>=0.28.0",
+    "httpx>=0.28.1",
+    "pyyaml>=6.0.3",
 ]
 
 [dependency-groups]
