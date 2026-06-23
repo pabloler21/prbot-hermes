@@ -4,9 +4,47 @@ Notas de handoff entre fases. Se actualiza al cerrar cada fase.
 
 ## Estado actual
 
-- **Fase en curso:** Fase 3 — MVP end-to-end (GitHub MCP + approval gate + worker post-comment).
-- **Rama activa:** `feat/f3-github-mvp` (por crear).
-- **Rama anterior:** `feat/f2-n8n-inventory` (pendiente de mergear a `main`).
+- **Fase 3 — MVP end-to-end: COMPLETA y validada en el VPS (2026-06-22).** 3a (lectura),
+  Redis asegurado, y 3b (escritura: worker arq + approval gate) funcionando end-to-end.
+- **Rama:** `feat/f3-github-mvp` (PR #1), lista para mergear a `main`.
+
+### Fase 3a — GitHub MCP solo-lectura (completo, validado 2026-06-19)
+
+- MCP de GitHub conectado vía CLI `hermes mcp add` (NO por bloque `mcp_servers` del
+  config — ese supuesto de ADR-0002 era incorrecto; corregido en ADR-0004).
+- PAT cargado en `~/.hermes/.env` como `GITHUB_PAT`, referenciado como `${GITHUB_PAT}`
+  (no hardcodeado). PAT scopeado: read + PR/issue comments + actions:read; sin merge/push.
+- MCP en SOLO-LECTURA: 14 tools de lectura activas, 12 de escritura desactivadas con
+  `hermes mcp configure`. Hermes no puede publicar directamente — solo leer.
+- Validado: Hermes leyó `CLAUDE.md` del repo desde Discord (`get_file_contents`).
+- `config/guardrails/repo-allowlist.yaml` creado (`pabloler21/prbot-hermes`); se aplicará
+  en el worker en 3b.
+
+### Redis — prerequisito de 3b (completo, asegurado 2026-06-21)
+
+Paso manual hecho por el humano. Instalado con `apt install redis-server`. Asegurado:
+- `bind 127.0.0.1 ::1` (solo localhost — no expuesto a internet).
+- `requirepass` con clave aleatoria (`openssl rand -hex 32`, formato hex para que sea
+  URL-safe dentro del `REDIS_URL`).
+- `REDIS_URL=redis://:<clave>@127.0.0.1:6379` cargado en `~/.hermes/.env` (chmod 600).
+- Verificado: `redis-cli ping` → `NOAUTH` (sin clave); `redis-cli -u "$REDIS_URL" ping` → `PONG`.
+
+### Fase 3b — escritura con approval gate (COMPLETA, validada 2026-06-22)
+
+Camino de escritura en **Python + arq** (ADR-0006, supersede ADR-0005; descartó BullMQ/TS
+por defendibilidad en el stack del autor + VPS de 1GB). Paquete `hermes_queue/`:
+- `settings.py` (conexión Redis), `jobs/post_comment.py` (productor + approval gate
+  Enfoque B: pendiente = clave Redis `pending-approval:<id>`; solo lo aprobado entra a la
+  cola de arq), `guardrails.py` (allowlist), `github_client.py` (POST comentario),
+  `events.py` (pub/sub).
+- `workers/post_comment_worker.py` (worker: allowlist + post + retries/backoff).
+- `mcp_server.py` (tool `propose_pr_comment` para Hermes) + `approval_bot.py` (bot Discord
+  con botones ✅/❌, gate determinístico restringido a la allowlist de usuarios).
+- Servicios systemd: `hermes-arq-worker`, `hermes-approval-bot` (corren como `hermes`).
+
+Validado end-to-end en el VPS: usuario (DM) → Hermes llama la tool → pendiente → bot con
+botones → aprobación → worker postea en GitHub. Allowlist, idempotencia (`_job_id` =
+sha256(repo+pr+body)) y manejo de errores (403 del PAT) confirmados en vivo.
 
 ## Fase 0 — Bootstrap (completa)
 
@@ -52,12 +90,13 @@ Entregado:
 
 - **Sandbox de Hermes:** backend `ssh` / host (Fase 1). Reevaluar Docker antes de las
   acciones sobre GitHub (Fase 3).
-- **Worker language:** por decidir en Fase 4 (ADR-0005). Estructura agnóstica hasta entonces.
+- **Worker language:** Python + arq (ADR-0006, supersede ADR-0005). Paquete `hermes_queue/`.
 - **Sin webhooks:** PAT es read-only, sin permisos de admin. Alertas via poll cada 5 min.
 - **Idempotencia:** obligatoria en todos los workers de poll desde el inicio.
 
 ## Próxima fase
 
-- **Fase 3** — MVP end-to-end: conectar GitHub MCP, allowlist de repos, approval gate
-  de publicación en BullMQ, worker `post-comment` con idempotencia.
-  Pasos manuales previos: generar PAT de GitHub (read + comments) y definir allowlist.
+- **Fase 4** — migrar los workflows de n8n a `cron_jobs` de arq (digests, alertas
+  recurrentes), reusando la infraestructura de cola desplegada en la Fase 3b.
+- **Pendiente menor (no bloqueante):** Hermes hoy responde solo por DM, no en el canal del
+  server (quirk del home channel). Revisar `DISCORD_HOME_CHANNEL` en `~/.hermes/.env`.

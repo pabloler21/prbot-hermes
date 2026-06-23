@@ -129,3 +129,164 @@ journalctl -u hermes-gateway -f            # logs en vivo
 - [ ] `~/.hermes/.env` con `chmod 600`.
 
 Cuando todo pase: actualizar `HANDOFF.md`, confirmar ADR-0002 y mergear la fase a `main`.
+
+---
+
+## 8. Conectar el MCP de GitHub — solo lectura (Fase 3a)
+
+> **PASO MANUAL (humano):** generar el PAT de GitHub (fine-grained), scopeado a:
+> Contents=read, Pull requests=read/write, Issues=read/write, Metadata=read,
+> Actions=read. **Sin** Administration ni Workflows:write (sin merge/push/force-push).
+> Cargarlo en `~/.hermes/.env` como `GITHUB_PAT` (chmod 600).
+
+El MCP **no** se declara en `config.yaml`: se gestiona con el CLI `hermes mcp`.
+
+```bash
+# Como usuario hermes:
+sudo su - hermes
+
+# Agregar el MCP de GitHub. Comillas SIMPLES en el env para guardar la referencia
+# literal ${GITHUB_PAT} (Hermes la resuelve en runtime desde ~/.hermes/.env; el
+# token NO queda hardcodeado en la config del MCP).
+hermes mcp add github --command npx \
+  --env GITHUB_PERSONAL_ACCESS_TOKEN='${GITHUB_PAT}' \
+  --args -y @modelcontextprotocol/server-github
+
+# GUARDRAIL: dejar el MCP en SOLO-LECTURA. Lanza un selector interactivo.
+# Responder 'select' y DESACTIVAR (SPACE) las 12 tools de escritura:
+#   create_or_update_file, create_repository, push_files, create_issue,
+#   create_pull_request, fork_repository, create_branch, update_issue,
+#   add_issue_comment, create_pull_request_review, merge_pull_request,
+#   update_pull_request_branch
+# Dejar tildadas SOLO las 14 de lectura. ENTER para confirmar.
+hermes mcp configure github
+
+# Verificar: debe decir "14 selected · enabled".
+hermes mcp list
+
+# Reiniciar el gateway para tomar los cambios (como ubuntu).
+exit
+sudo systemctl restart hermes-gateway
+```
+
+**Validación (3a):** desde Discord, pedirle a Hermes que lea un archivo del repo
+(p. ej. `get_file_contents` sobre `CLAUDE.md`). Debe devolver el contenido real.
+
+---
+
+## 9. Instalar y asegurar Redis (prerequisito de la Fase 3b)
+
+> **PASO MANUAL (humano).** Redis es el almacén que usa BullMQ para la cola de jobs.
+> Sin Redis no hay cola → no hay worker → no hay approval gate. Por eso es bloqueante
+> para 3b. El worker corre en la MISMA VPS, así que Redis NO necesita exponerse a
+> internet: lo dejamos escuchando solo en localhost + password (defensa en profundidad).
+
+```bash
+# Como ubuntu, instalar.
+sudo apt install redis-server
+
+# Asegurarlo: editar el config.
+sudo nano /etc/redis/redis.conf
+```
+
+En `redis.conf`, verificar/ajustar dos directivas (buscar con Ctrl+W):
+
+1. **`bind 127.0.0.1 ::1`** — solo localhost. El default de Ubuntu ya suele venir así;
+   NO usar `0.0.0.0` (eso lo expondría a internet en una IP pública = comprometido en horas).
+2. **`requirepass <clave>`** — descomentar y poner una clave fuerte. Generar con
+   `openssl rand -hex 32` (formato **hex**, no base64: hex es URL-safe y no rompe el
+   `REDIS_URL`; base64 trae `+` `/` `=` que tienen significado especial en una URL).
+
+```bash
+# Aplicar y verificar.
+sudo systemctl restart redis-server
+redis-cli ping                      # esperado: (error) NOAUTH Authentication required.
+redis-cli -a '<clave>' ping         # esperado: PONG
+```
+
+Cargar la URL de conexión en el `.env` de Hermes (como usuario `hermes`):
+
+```bash
+sudo su - hermes
+nano ~/.hermes/.env
+#   añadir:  REDIS_URL=redis://:<clave>@127.0.0.1:6379
+#   (el ':' va solo, sin usuario: Redis con requirepass no usa username)
+chmod 600 ~/.hermes/.env
+
+# Verificar la URL completa de punta a punta (como la leerá BullMQ).
+redis-cli -u "$(grep REDIS_URL ~/.hermes/.env | cut -d= -f2-)" ping   # esperado: PONG
+```
+
+**Validación (Redis):** `redis-cli ping` sin clave da `NOAUTH`; con la URL del `.env`
+da `PONG`. Con eso, la Fase 3b queda desbloqueada.
+
+---
+
+## 10. Desplegar la capa de cola (Fase 3b: arq worker + MCP + bot de aprobación)
+
+Arquitectura del flujo: usuario en Discord → **Hermes** llama la tool MCP
+`propose_pr_comment` → encola un pendiente y publica un aviso (pub/sub) → el **bot de
+aprobación** muestra botones ✅/❌ → al aprobar, pasa a la cola → el **arq worker** valida
+la allowlist y postea en GitHub → el bot reporta el resultado.
+
+> **PASOS MANUALES (humano):**
+> - Crear el SEGUNDO bot de Discord ("APPROVAL_BOT"), invitarlo al server, copiar su token.
+> - Cargar en `~/.hermes/.env` (chmod 600): `DISCORD_APPROVAL_BOT_TOKEN`,
+>   `DISCORD_APPROVAL_CHANNEL_ID` (ID del canal de aprobaciones).
+
+### 10.1 Traer el repo al VPS e instalar dependencias (como usuario `hermes`)
+
+```bash
+sudo su - hermes
+
+# uv para el usuario hermes (si no lo tiene):
+command -v uv || curl -LsSf https://astral.sh/uv/install.sh | sh
+#   reabrir la shell o: source ~/.local/bin/env
+
+# Clonar el repo y la rama de la fase.
+git clone https://github.com/pabloler21/prbot-hermes.git ~/prbot-hermes
+cd ~/prbot-hermes && git checkout feat/f3-github-mvp
+
+# Crear el venv con todas las deps (arq, discord.py, mcp, httpx, pyyaml).
+uv sync
+```
+
+### 10.2 Registrar el MCP en Hermes
+
+El MCP necesita encontrar el paquete `hermes_queue`, por eso se pasa `PYTHONPATH`.
+
+```bash
+hermes mcp add hermes-queue \
+  --command /home/hermes/prbot-hermes/.venv/bin/python \
+  --env PYTHONPATH='/home/hermes/prbot-hermes' \
+  --env REDIS_URL='${REDIS_URL}' \
+  --args -m hermes_queue.mcp_server
+
+hermes mcp list   # debe aparecer hermes-queue
+sudo systemctl restart hermes-gateway
+```
+
+### 10.3 Instalar y arrancar los servicios (como `ubuntu`/root)
+
+```bash
+sudo cp ~hermes/prbot-hermes/deploy/systemd/hermes-arq-worker.service /etc/systemd/system/
+sudo cp ~hermes/prbot-hermes/deploy/systemd/hermes-approval-bot.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now hermes-arq-worker hermes-approval-bot
+sudo systemctl status hermes-arq-worker hermes-approval-bot   # ambos active (running)
+```
+
+### 10.4 Validar (checklist de cierre de la Fase 3b — ADR-0004)
+
+- [ ] Pedido sobre un repo **fuera de la allowlist** → el worker lo rechaza (ver
+      `journalctl -u hermes-arq-worker`), no se postea.
+- [ ] Ningún comentario se postea **sin aprobar** por Discord (rechazar → nada).
+- [ ] **Idempotencia:** el mismo pedido no duplica el comentario.
+- [ ] End-to-end: pedirle a Hermes comentar en un PR del repo permitido → aprobar →
+      el comentario aparece en GitHub y el bot reporta la URL.
+
+### 10.5 Puntos a vigilar (incertidumbres conocidas)
+
+- `uv` puede no estar en el PATH del usuario `hermes`: usar rutas absolutas o `source`.
+- Si Hermes no encuentra `hermes_queue` al spawnear el MCP, revisar el `PYTHONPATH`.
+- Si systemd no parsea bien el `.env`, mirar `journalctl -u hermes-arq-worker`.
