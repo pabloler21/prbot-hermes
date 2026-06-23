@@ -16,7 +16,7 @@ Hermes is operated as a dependency — **do not fork it**. What gets versioned h
 - **Phase 1 (Hermes live on Discord):** ✅ merged to `main`.
 - **Phase 2 (n8n inventory + migration map):** ✅ merged to `main`. Inventory is *invented* (realistic team workflows) — the author has no real n8n access; we build the migration as if real for a portfolio/demo. See `docs/n8n-inventory.md`.
 - **Phase 3 (GitHub MVP: read MCP + approval-gated write path):** ✅ **COMPLETE, validated end-to-end on the VPS, merged to `main`** (PR #1). 3a = GitHub MCP read-only; 3b = the Python/arq write path with approval gate. Validated flow: user (DM) → Hermes → MCP tool `propose_pr_comment` → pending → Discord approval bot (✅/❌) → arq worker posts the comment to GitHub. Allowlist rejection, idempotency, and error handling confirmed live.
-- **Phase 4 (next):** migrate n8n workflows to **arq `cron_jobs`** (daily digests, PR alerts), reusing the queue infra already deployed.
+- **Phase 4 (next):** harden the durable queue as a production service. Per the plan this is **NOT** the n8n migration (that's Phase 6). Most of it was already built in 3b (Redis secured + worker/bot as systemd services with retries/backoff). Genuinely remaining: **dead-letter** for jobs that exhaust retries (arq has no native DLQ — we build it), **concurrency cap** (`max_jobs`) as rate-limiting, a formal **reboot-survival** test of the new services, and queue **observability/runbook**. Later: Phase 5 = issue triage + doc reading; Phase 6 = daily digest (`cron_jobs`) + n8n parity; Phase 7 = cutover.
 
 **Known minor follow-up (non-blocking):** Hermes currently replies only in DM, not in the server channel (home-channel quirk — see `DISCORD_HOME_CHANNEL`).
 
