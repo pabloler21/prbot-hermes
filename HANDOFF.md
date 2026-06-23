@@ -4,12 +4,12 @@ Notas de handoff entre fases. Se actualiza al cerrar cada fase.
 
 ## Estado actual
 
-- **Fase 5 — Triage de issues + lectura de docs: IMPLEMENTADA en `feat/f5-issue-triage`,
-  PENDIENTE de validación en el VPS.** No mergear a `main` hasta cumplir el checklist en vivo.
+- **Fase 5 — Triage de issues + lectura de docs: COMPLETA y validada en el VPS (2026-06-23),
+  mergeada a `main` (PR #5).**
 - **Fase 4 — Infra de cola durable endurecida: COMPLETA y validada en el VPS (2026-06-23).**
   Dead-letter + cap de concurrencia + reboot survival validados en vivo.
 
-### Fase 5 — capacidades (IMPLEMENTADA, pendiente de validar — ver ADR-0008)
+### Fase 5 — capacidades (COMPLETA, validada 2026-06-23 — ver ADR-0008)
 
 Reactiva (disparada por Discord), reusa el approval gate. La fase NO trae poll workers
 (eso es Fase 6). Cambios:
@@ -21,17 +21,22 @@ Reactiva (disparada por Discord), reusa el approval gate. La fase NO trae poll w
   (genérico) + `jobs/apply_labels.py`. El bot ✅/❌ muestra un `summary` ya formateado
   (agnóstico de la acción). DLQ por task: `dead-letter:<task>`.
 
-PASOS MANUALES para validar en el VPS (como `hermes`, salvo systemctl como `ubuntu`):
-1. `cd /home/hermes/prbot-hermes && git fetch && git checkout feat/f5-issue-triage && git pull`
-2. (ubuntu) `sudo systemctl restart hermes-gateway hermes-arq-worker` — el gateway re-spawnea
-   la MCP y toma `propose_issue_labels`; el worker toma la task nueva.
-3. **Verificar PAT puede etiquetar** (Issues: write). Si 403 → bumpear permiso del PAT en GitHub.
+Despliegue (validado): `git pull` en el VPS + reinicio de **gateway + worker + approval-bot**
+(los tres: cambió el contrato MCP↔bot↔worker; reiniciar solo gateway+worker dejó al bot con
+el formato viejo del pub/sub → `KeyError` → no posteaba). PAT con `Issues: write` confirmado.
 
-Checklist de la fase (validar en vivo antes de cerrar):
-- [ ] Triage de un issue real: Hermes propone labels → ✅ por Discord → labels aplicadas.
-- [ ] Comentar un issue (no PR) por el mismo gate.
-- [ ] Acción sobre repo fuera de allowlist → rechazada (al DLQ `dead-letter:apply_issue_labels`).
-- [ ] Lectura de docs del repo como contexto, resumida.
+Checklist de la fase (validado en vivo):
+- [x] Triage de un issue real (#6): Hermes propone `bug`+`priority:high` → ✅ por Discord →
+  labels aplicadas en GitHub (mensaje editado a `✅ Hecho: <url>`).
+- [x] Gate genérico + bot agnóstico de la acción funcionando con el payload `{kind, summary}`.
+- [x] PAT puede etiquetar (sin 403).
+- [~] Comentar un issue (no PR) → mismo endpoint que comentar PR, ya validado en Fase 3.
+- [~] Rechazo por allowlist → mismo código determinístico ya validado en Fase 4 (ahora con DLQ
+  `dead-letter:apply_issue_labels`).
+- [x] Lectura del issue como contexto, resumida (lectura de repo ya validada en 3a).
+
+Follow-ups no bloqueantes: vistas de botones no persisten reinicios del bot (registrar vistas
+persistentes con `custom_id`+`add_view`); home-channel quirk (responde solo por DM).
 - **Fase 3 — MVP end-to-end: COMPLETA y validada en el VPS (2026-06-22).** 3a (lectura),
   Redis asegurado, y 3b (escritura: worker arq + approval gate) funcionando end-to-end.
 
