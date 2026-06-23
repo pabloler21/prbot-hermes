@@ -4,8 +4,36 @@ Notas de handoff entre fases. Se actualiza al cerrar cada fase.
 
 ## Estado actual
 
+- **Fase 6b — Paridad n8n (4 workflows restantes): IMPLEMENTADA en `feat/f6b-parity`,
+  PENDIENTE de validación en el VPS.** No mergear hasta disparar los jobs en vivo.
 - **Fase 6a — Digest diario (arq cron + webhook): COMPLETA y validada en el VPS (2026-06-23),
   mergeada a `main` (PR #7).** Disparo manual posteó el digest en `#digest` (PR #7 listado).
+
+### Fase 6b — paridad n8n (IMPLEMENTADA, pendiente de validar — ver ADR-0010)
+
+Los 4 workflows restantes del inventario, reusando el patrón de la 6a (cron de arq en el
+mismo worker, entrega por webhook, sin approval gate, deterministas):
+- **Reportes (cron):** `stale_pr_alert` (lun-vie 10:00, PRs sin actividad >3 días; no postea
+  si no hay) y `weekly_summary` (vie 18:00, PRs mergeados + issues cerrados en 7 días).
+- **Alerts (poll cada 5 min):** `new_issue_alert` y `deploy_notification` (PRs mergeados a
+  `main`). Mecanismo nuevo en `poll_state.py`: **cursor** (`cursor:<wf>:<repo>`) acota la
+  ventana; **baseline** en la 1ª corrida (no avisa histórico); **seen-set**
+  (`seen:<wf>:<repo>`, sorted-set capado a 500) deduplica. Idempotencia `repo+issue_number`
+  y `repo+pr_number+merged_at`.
+- Nuevos: `poll_state.py`, `jobs/reports.py`, `jobs/alerts.py`. `github_client` suma
+  `list_recently_merged_prs` / `list_recently_closed_issues` / `list_new_issues` + `updated_at`.
+
+PASOS MANUALES para validar (sin webhook nuevo — reusa el de la 6a):
+1. `git pull` de la branch en el VPS + `sudo systemctl restart hermes-arq-worker`.
+2. Disparar los jobs a mano (heredoc en runbook → "Trabajos recurrentes — paridad n8n").
+3. Para ver un poll real: crear un issue / mergear un PR DESPUÉS del baseline y re-disparar.
+
+Checklist (validar en vivo):
+- [ ] `arq ... --check`: los 5 cron cargados; worker sin errores.
+- [ ] `stale_pr_alert` y `weekly_summary` postean en Discord (o stale calla si no hay estancados).
+- [ ] `new_issue_alert`: 1ª corrida = baseline; tras crear un issue, lo avisa una sola vez.
+- [ ] `deploy_notification`: tras mergear un PR a `main`, lo avisa una sola vez.
+- [ ] Cursores/seen-sets visibles en Redis (`keys cursor:*`).
 - **Fase 5 — Triage de issues + lectura de docs: COMPLETA y validada en el VPS (2026-06-23),
   mergeada a `main` (PR #5).**
 - **Fase 4 — Infra de cola durable endurecida: COMPLETA y validada en el VPS (2026-06-23).**
@@ -174,10 +202,11 @@ Entregado:
 
 ## Próxima fase
 
-- **Fase 6 — Digest diario como job recurrente (`cron_jobs` de arq) + paridad n8n.** Primer
-  trabajo recurrente/automático → **acá** aparece el caudal automático y se reevalúa el
-  rate-limiting por QPS (hoy resuelto con cap de concurrencia, ver ADR-0007). NB: la Fase 5
-  fue reactiva, sin poll workers.
-- Roadmap restante: Fase 7 = cutover (deshabilitar y retirar n8n).
+- **Fase 7 — Cutover:** deshabilitar n8n (sin eliminar) → ventana de observación (7 días sin
+  errores, criterio de la Fase 2) → baja definitiva con export final guardado. Solo cuando la
+  6b esté validada y los 5 workflows corran estables. PASOS MANUALES (humano): deshabilitar y
+  luego dar de baja n8n.
+- Con la 6b se alcanza **paridad funcional** con n8n (los 5 workflows del inventario tienen su
+  equivalente en arq).
 - **Pendiente menor (no bloqueante):** Hermes hoy responde solo por DM, no en el canal del
   server (quirk del home channel). Revisar `DISCORD_HOME_CHANNEL` en `~/.hermes/.env`.

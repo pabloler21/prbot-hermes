@@ -139,6 +139,63 @@ PY
 El cron es idempotente por horario (`unique=True`): un reinicio cerca de las 9:00 no duplica
 el envío. Para verificar que el worker tiene el cron cargado: `arq ... --check` (sección Health).
 
+## Trabajos recurrentes — paridad n8n (Fase 6b)
+
+Los 5 workflows (todos cron de arq en el mismo worker, entrega por webhook, sin approval gate):
+
+| Job | Schedule (UTC-3) | Tipo |
+|---|---|---|
+| `daily_pr_digest` | lun-vie 09:00 | reporte |
+| `stale_pr_alert` | lun-vie 10:00 | reporte (no postea si no hay estancados) |
+| `weekly_summary` | vie 18:00 | reporte |
+| `new_issue_alert` | cada 5 min | poll (cursor + dedup) |
+| `deploy_notification` | cada 5 min | poll (cursor + dedup) |
+
+### Disparar cualquier job a mano (validar sin esperar al horario)
+
+```bash
+sudo su - hermes
+cd /home/hermes/prbot-hermes
+set -a; source ~/.hermes/.env; set +a
+.venv/bin/python - <<'PY'
+import asyncio
+from arq import create_pool
+from hermes_queue.settings import redis_settings_from_env
+from hermes_queue.workers import post_comment_worker as w
+
+async def main():
+    # ctx mínimo: las corutinas de poll usan ctx["redis"]; los reportes lo ignoran.
+    pool = await create_pool(redis_settings_from_env())
+    ctx = {"redis": pool}
+    # cambiar por el job a probar:
+    await w.stale_pr_alert(ctx)
+    await w.weekly_summary(ctx)
+    await w.new_issue_alert(ctx)
+    await w.deploy_notification(ctx)
+    await pool.aclose()
+    print("jobs disparados — revisá Discord")
+
+asyncio.run(main())
+PY
+```
+
+> Nota sobre los poll: la 1ª corrida solo fija el **baseline** (no avisa histórico). Para ver
+> un aviso real, creá un issue / mergeá un PR DESPUÉS de esa primera corrida y volvé a dispararlo.
+
+### Inspeccionar / resetear el estado de los poll
+
+```bash
+# cursores (timestamp de la última corrida por workflow y repo)
+redis-cli -u "$REDIS_URL" keys 'cursor:*'
+redis-cli -u "$REDIS_URL" get 'cursor:new_issue:pabloler21/prbot-hermes'
+
+# ids ya avisados (sorted-set, score = timestamp)
+redis-cli -u "$REDIS_URL" zrange 'seen:new_issue:pabloler21/prbot-hermes' 0 -1 WITHSCORES
+
+# resetear un poll (vuelve a fijar baseline en la próxima corrida):
+redis-cli -u "$REDIS_URL" del 'cursor:new_issue:pabloler21/prbot-hermes'
+```
+
 ## Supervivencia a reboot (validación Fase 4 — PASO MANUAL)
 
 ```bash
