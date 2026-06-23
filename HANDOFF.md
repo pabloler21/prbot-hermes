@@ -96,7 +96,13 @@ Entregado:
 
 ## Próxima fase
 
-- **Fase 4** — migrar los workflows de n8n a `cron_jobs` de arq (digests, alertas
-  recurrentes), reusando la infraestructura de cola desplegada en la Fase 3b.
+- **Fase 4 — Infra de cola durable como servicio de producción** (según el plan, no
+  migración de n8n — eso es la Fase 6). Buena parte ya se hizo en 3b (Redis asegurado +
+  worker/bot como servicios systemd con reintentos/backoff). Lo que **falta**: dead-letter
+  para jobs que agotan reintentos (arq no tiene DLQ nativa), límite de concurrencia
+  (`max_jobs`) como rate-limiting, test formal de reboot-survival de los servicios nuevos,
+  y observabilidad/runbook de la cola.
+- Roadmap restante: Fase 5 = triage de issues + lectura de docs; Fase 6 = digest diario
+  (`cron_jobs`) + paridad n8n; Fase 7 = cutover (retirar n8n).
 - **Pendiente menor (no bloqueante):** Hermes hoy responde solo por DM, no en el canal del
   server (quirk del home channel). Revisar `DISCORD_HOME_CHANNEL` en `~/.hermes/.env`.
