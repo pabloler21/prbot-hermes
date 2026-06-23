@@ -4,14 +4,14 @@ Notas de handoff entre fases. Se actualiza al cerrar cada fase.
 
 ## Estado actual
 
-- **Fase 6a — Digest diario (arq cron + webhook): IMPLEMENTADA en `feat/f6-digest`,
-  PENDIENTE de validación en el VPS.** No mergear hasta validar el envío en vivo.
+- **Fase 6a — Digest diario (arq cron + webhook): COMPLETA y validada en el VPS (2026-06-23),
+  mergeada a `main` (PR #7).** Disparo manual posteó el digest en `#digest` (PR #7 listado).
 - **Fase 5 — Triage de issues + lectura de docs: COMPLETA y validada en el VPS (2026-06-23),
   mergeada a `main` (PR #5).**
 - **Fase 4 — Infra de cola durable endurecida: COMPLETA y validada en el VPS (2026-06-23).**
   Dead-letter + cap de concurrencia + reboot survival validados en vivo.
 
-### Fase 6a — digest diario (IMPLEMENTADA, pendiente de validar — ver ADR-0009)
+### Fase 6a — digest diario (COMPLETA, validada 2026-06-23 — ver ADR-0009)
 
 Primer trabajo recurrente. `daily_pr_digest` = **cron job de arq** (lun-vie 09:00 UTC-3,
 `unique=True` → idempotente por horario) en el mismo worker (sin servicio nuevo). Lee PRs
@@ -26,10 +26,12 @@ PASOS MANUALES para validar:
 3. Disparar el digest a mano (heredoc en `docs/runbook.md`, sección "Digest diario") y
    verificar el mensaje en `#dev`.
 
-Checklist (validar en vivo):
-- [ ] El digest se postea en `#dev` con los PRs abiertos (o "No hay PRs abiertos").
-- [ ] `arq ... --check` muestra el cron cargado; el worker arranca sin errores.
-- [ ] (Opcional) Reinicio del worker no duplica el envío diario (idempotencia por horario).
+Checklist (validado en vivo):
+- [x] El digest se postea en Discord (canal `#digest`) con los PRs abiertos — disparo manual
+  listó el PR #7 con su antigüedad; webhook devolvió HTTP 204.
+- [x] El worker arranca con el cron cargado, sin errores.
+- [~] Idempotencia por horario: garantizada por `unique=True` de arq (no se probó el reinicio
+  exacto a las 9:00; el mecanismo está verificado).
 
 Pendiente (Fase 6b): los otros 4 workflows del inventario (issue alert + deploy notif por
 poll cada 5 min con cursor en Redis; stale PR cron 10:00; weekly cron viernes 18:00).
