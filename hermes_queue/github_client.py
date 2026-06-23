@@ -64,3 +64,35 @@ async def add_issue_labels(repo: str, issue_number: int, labels: list[str]) -> s
     # El endpoint de labels devuelve la lista de labels, no el issue. Construimos
     # la URL del issue para reportarla de vuelta en Discord.
     return f"https://github.com/{repo}/issues/{issue_number}"
+
+
+async def list_open_pull_requests(repo: str) -> list[dict]:
+    """Lista los PRs ABIERTOS (excluye drafts) de un repo, para el digest.
+
+    Endpoint GET /repos/{repo}/pulls?state=open. Devuelve, por cada PR, solo lo que
+    el digest necesita: number, title, author, created_at (ISO 8601), html_url.
+
+    Lanza httpx.HTTPStatusError (4xx/5xx) y httpx.RequestError (red/timeout).
+    """
+    url = f"https://api.github.com/repos/{repo}/pulls"
+    # sort/direction: los más viejos primero (los que más tiempo llevan esperando review).
+    params = {"state": "open", "per_page": 100, "sort": "created", "direction": "asc"}
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.get(url, headers=_headers(), params=params)
+
+    response.raise_for_status()
+    prs: list[dict] = []
+    for pr in response.json():
+        if pr.get("draft"):
+            continue  # los borradores no necesitan review todavía
+        prs.append(
+            {
+                "number": pr["number"],
+                "title": pr["title"],
+                "author": pr["user"]["login"],
+                "created_at": pr["created_at"],
+                "html_url": pr["html_url"],
+            }
+        )
+    return prs
