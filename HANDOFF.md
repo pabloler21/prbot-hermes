@@ -4,9 +4,29 @@ Notas de handoff entre fases. Se actualiza al cerrar cada fase.
 
 ## Estado actual
 
+- **Fase 4 — Infra de cola durable endurecida: COMPLETA y validada en el VPS (2026-06-23).**
+  Dead-letter + cap de concurrencia + reboot survival validados en vivo.
 - **Fase 3 — MVP end-to-end: COMPLETA y validada en el VPS (2026-06-22).** 3a (lectura),
   Redis asegurado, y 3b (escritura: worker arq + approval gate) funcionando end-to-end.
-- **Rama:** `feat/f3-github-mvp` (PR #1), lista para mergear a `main`.
+
+### Fase 4 — endurecimiento de la cola (COMPLETA, validada 2026-06-23)
+
+arq no tiene dead-letter ni rate-limiter por QPS nativos (verificado vía Context7). Se
+agregó:
+- `hermes_queue/deadletter.py`: DLQ como lista de Redis `dead-letter:post_comment` (cap
+  100), con `record` / `list` / `requeue`. El worker manda al DLQ los fallos permanentes
+  (4xx, repo fuera de allowlist) y los transitorios que agotan los 5 reintentos.
+- `WorkerSettings`: `max_tries=5` explícito + `max_jobs=2` (concurrencia como rate-limit;
+  el approval gate humano ya throttlea las escrituras). Ver ADR-0007.
+- Runbook ampliado: health (`arq --check`), inspeccionar/reencolar DLQ, check de reboot.
+
+Checklist validado en el VPS:
+- [x] Dead-letter captura un fallo: pedido a repo fuera de allowlist → entry
+  `repo-not-allowed` en `dead-letter:post_comment` (en 3b se perdía sin rastro).
+- [x] Reintentos/backoff (heredado de 3b).
+- [x] Cap de concurrencia desplegado (`max_jobs=2`).
+- [x] Reboot survival: tras `sudo reboot`, los 4 servicios (`redis-server`,
+  `hermes-gateway`, `hermes-arq-worker`, `hermes-approval-bot`) quedaron `active`.
 
 ### Fase 3a — GitHub MCP solo-lectura (completo, validado 2026-06-19)
 
@@ -96,13 +116,12 @@ Entregado:
 
 ## Próxima fase
 
-- **Fase 4 — Infra de cola durable como servicio de producción** (según el plan, no
-  migración de n8n — eso es la Fase 6). Buena parte ya se hizo en 3b (Redis asegurado +
-  worker/bot como servicios systemd con reintentos/backoff). Lo que **falta**: dead-letter
-  para jobs que agotan reintentos (arq no tiene DLQ nativa), límite de concurrencia
-  (`max_jobs`) como rate-limiting, test formal de reboot-survival de los servicios nuevos,
-  y observabilidad/runbook de la cola.
-- Roadmap restante: Fase 5 = triage de issues + lectura de docs; Fase 6 = digest diario
-  (`cron_jobs`) + paridad n8n; Fase 7 = cutover (retirar n8n).
+- **Fase 5 — Capacidades: triage de issues + lectura de documentación.** Hermes clasifica/
+  etiqueta issues y responde consultas leyendo docs del repo, reusando el approval gate
+  para cualquier acción de escritura (etiquetar, comentar). Aparecen los primeros workers
+  de *poll* automáticos → ahí se reevalúa el rate-limiting por QPS (hoy resuelto con cap de
+  concurrencia, ver ADR-0007).
+- Roadmap restante: Fase 6 = digest diario (`cron_jobs` de arq) + paridad n8n; Fase 7 =
+  cutover (deshabilitar y retirar n8n).
 - **Pendiente menor (no bloqueante):** Hermes hoy responde solo por DM, no en el canal del
   server (quirk del home channel). Revisar `DISCORD_HOME_CHANNEL` en `~/.hermes/.env`.
