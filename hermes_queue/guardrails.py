@@ -30,3 +30,8 @@ def _load_allowed_repos() -> frozenset[str]:
 def is_repo_allowed(repo: str) -> bool:
     """True si 'owner/repo' está en la allowlist."""
     return repo in _load_allowed_repos()
+
+
+def allowed_repos() -> list[str]:
+    """Lista ordenada de repos permitidos (para iterar, p. ej. en el digest)."""
+    return sorted(_load_allowed_repos())

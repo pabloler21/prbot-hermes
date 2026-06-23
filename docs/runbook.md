@@ -103,6 +103,42 @@ PY
 redis-cli -u "$REDIS_URL" zcard arq:queue   # jobs pendientes/en vuelo en la cola de arq
 ```
 
+## Digest diario (Fase 6 — trabajo recurrente)
+
+El `daily_pr_digest` es un **cron job de arq** (lun-vie 09:00 UTC-3) registrado en el mismo
+worker. Lee los PRs abiertos de los repos de la allowlist y los postea a Discord vía el
+**webhook** `DISCORD_DIGEST_WEBHOOK_URL`. No tiene approval gate (solo lee GitHub y publica
+en nuestro canal). Ver ADR-0009.
+
+**PASO MANUAL (una vez):** crear el webhook en `#dev` (Editar canal → Integraciones →
+Webhooks → Nuevo webhook), copiar la URL y cargarla en `~/.hermes/.env`:
+
+```bash
+# como hermes, editar ~/.hermes/.env (mantener chmod 600) y agregar:
+# DISCORD_DIGEST_WEBHOOK_URL=https://discord.com/api/webhooks/...
+# luego, como ubuntu, recargar el worker para que tome la variable:
+sudo systemctl restart hermes-arq-worker
+```
+
+**Validar SIN esperar a las 9am** (dispara el digest ahora; ejercita GitHub + webhook reales):
+
+```bash
+sudo su - hermes
+cd /home/hermes/prbot-hermes
+set -a; source ~/.hermes/.env; set +a
+.venv/bin/python - <<'PY'
+import asyncio
+from hermes_queue.workers.post_comment_worker import daily_pr_digest
+
+# La corutina ignora ctx; le pasamos {} para correrla suelta.
+asyncio.run(daily_pr_digest({}))
+print("digest disparado — revisá #dev en Discord")
+PY
+```
+
+El cron es idempotente por horario (`unique=True`): un reinicio cerca de las 9:00 no duplica
+el envío. Para verificar que el worker tiene el cron cargado: `arq ... --check` (sección Health).
+
 ## Supervivencia a reboot (validación Fase 4 — PASO MANUAL)
 
 ```bash

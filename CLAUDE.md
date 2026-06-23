@@ -18,7 +18,8 @@ Hermes is operated as a dependency — **do not fork it**. What gets versioned h
 - **Phase 3 (GitHub MVP: read MCP + approval-gated write path):** ✅ **COMPLETE, validated end-to-end on the VPS, merged to `main`** (PR #1). 3a = GitHub MCP read-only; 3b = the Python/arq write path with approval gate. Validated flow: user (DM) → Hermes → MCP tool `propose_pr_comment` → pending → Discord approval bot (✅/❌) → arq worker posts the comment to GitHub. Allowlist rejection, idempotency, and error handling confirmed live.
 - **Phase 4 (durable-queue hardening):** ✅ **COMPLETE, validated end-to-end on the VPS, merged to `main`** (PR #3). Added a **dead-letter queue** (arq has none native — Redis list `dead-letter:post_comment`, capped, with manual requeue), a **concurrency cap** (`max_jobs=2`) as rate-limiting (arq has no QPS token-bucket; the human approval gate already throttles writes), and validated **reboot-survival** of the worker/bot services. See ADR-0007. NB: per the plan, Phase 4 was queue-infra hardening, **NOT** the n8n migration (that's Phase 6).
 - **Phase 5 (issue triage + documentation reading):** ✅ **COMPLETE, validated end-to-end on the VPS, merged to `main`** (PR #5). Reactive (Discord-triggered), reuses the approval gate. Commenting on issues already worked (`propose_pr_comment` serves PR *and* issue — same endpoint); reading issues/docs already worked via the read-only MCP. The only new write action is **applying labels**: tool `propose_issue_labels` → gate → task `apply_issue_labels` in the same worker. The approval gate was **generalized to be action-agnostic** (pending record carries `{task, data}`; bot shows a pre-formatted `summary`); DLQ is now per-task (`dead-letter:<task>`). Validated live: Hermes read issue #6, proposed `bug`+`priority:high`, the approval bot showed ✅/❌, approving applied the labels via GitHub (PAT `Issues: write` confirmed, no 403). See ADR-0008. **NB: Phase 5 is reactive — it does NOT add poll workers.** The first automatic/recurring work (and the per-QPS rate-limiting revisit) is **Phase 6** (daily digest via `cron_jobs`).
-- **Phase 6 (next):** daily digest as a recurring **arq `cron_jobs`** + n8n parity (single scheduling mechanism, no second cron). This is where **automatic poll work** first appears → revisit per-QPS rate-limiting (today handled by the `max_jobs` concurrency cap). Then Phase 7 = cutover (disable, observe, retire n8n).
+- **Phase 6a (daily PR digest):** ✅ **COMPLETE, validated end-to-end on the VPS, merged to `main`** (PR #7). First **recurring** work: `daily_pr_digest` is an **arq `cron_jobs`** entry (mon-fri 09:00 UTC-3, explicit `timezone`) in the *same* worker (no new systemd service). It reads open PRs of the allowlisted repos and posts a deterministic Markdown digest to Discord via an **incoming webhook** (`discord_client.py`, `DISCORD_DIGEST_WEBHOOK_URL`, splits >2000 chars) — **no approval gate** (it only reads GitHub + posts to our own channel). Idempotent by scheduled time (`cron(unique=True)` → a restart near 09:00 doesn't double-send). Validated live: manual trigger posted the digest to `#digest` (webhook returned HTTP 204). See ADR-0009.
+- **Phase 6b (next):** the other 4 n8n workflows for full parity — New Issue Alert + Deploy Notification as **poll** jobs (every 5 min, Redis cursor + idempotency `repo+issue_number` / `repo+pr_number+merged_at`), Stale PR Alert (cron 10:00), Weekly Summary (cron Fri 18:00). **This is where automatic poll work first appears** → revisit per-QPS rate-limiting (today handled by the `max_jobs` concurrency cap). Then Phase 7 = cutover (disable, observe, retire n8n).
 
 **Known follow-ups (non-blocking):**
 - Hermes currently replies only in DM, not in the server channel (home-channel quirk — see `DISCORD_HOME_CHANNEL`).
@@ -43,7 +44,7 @@ Hermes is operated as a dependency — **do not fork it**. What gets versioned h
 
 ## Branching
 
-- `main` reflects the deployed configuration (now through Phase 5).
+- `main` reflects the deployed configuration (now through Phase 6a).
 - One **feature branch per phase**: `feat/fX-nombre`. Merge to `main` only when the checklist is complete. Every merge updates `HANDOFF.md` + ADR(s).
 
 ## Architecture (how the pieces fit)
@@ -72,11 +73,13 @@ hermes_queue/      # arq queue layer (Python):
   jobs/gate.py       # generic, action-agnostic approval gate (enqueue_pending/approve/reject; pending = {task, data})
   jobs/post_comment.py  # PostCommentRequest data type + idempotency key
   jobs/apply_labels.py  # ApplyLabelsRequest data type + idempotency key (Phase 5)
-  guardrails.py      # repo allowlist (deterministic)
-  github_client.py   # POST a PR/issue comment + add issue labels via GitHub REST API
+  jobs/digest.py     # build_pr_digest: format open PRs as Markdown (Phase 6, pure/testable)
+  guardrails.py      # repo allowlist (deterministic) + allowed_repos() to iterate
+  github_client.py   # PR/issue comment + add issue labels + list_open_pull_requests (GitHub REST)
+  discord_client.py  # post_to_discord via incoming webhook (digest delivery, splits >2000 chars)
   events.py          # Redis pub/sub (MCP -> approval bot); publishes {kind, summary}
   deadletter.py      # per-task dead-letter (Redis list dead-letter:<task>) + manual requeue (arq has no native DLQ)
-  workers/post_comment_worker.py  # arq worker: tasks post_comment + apply_issue_labels (allowlist + act + retries + dead-letter)
+  workers/post_comment_worker.py  # arq worker: tasks post_comment + apply_issue_labels + cron daily_pr_digest (timezone UTC-3)
   mcp_server.py      # FastMCP server: tools propose_pr_comment + propose_issue_labels for Hermes
   approval_bot.py    # discord.py bot: ✅/❌ buttons (deterministic, action-agnostic gate)
 deploy/systemd/    # units: hermes-gateway, hermes-arq-worker, hermes-approval-bot

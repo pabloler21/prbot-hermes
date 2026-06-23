@@ -4,10 +4,37 @@ Notas de handoff entre fases. Se actualiza al cerrar cada fase.
 
 ## Estado actual
 
+- **Fase 6a — Digest diario (arq cron + webhook): COMPLETA y validada en el VPS (2026-06-23),
+  mergeada a `main` (PR #7).** Disparo manual posteó el digest en `#digest` (PR #7 listado).
 - **Fase 5 — Triage de issues + lectura de docs: COMPLETA y validada en el VPS (2026-06-23),
   mergeada a `main` (PR #5).**
 - **Fase 4 — Infra de cola durable endurecida: COMPLETA y validada en el VPS (2026-06-23).**
   Dead-letter + cap de concurrencia + reboot survival validados en vivo.
+
+### Fase 6a — digest diario (COMPLETA, validada 2026-06-23 — ver ADR-0009)
+
+Primer trabajo recurrente. `daily_pr_digest` = **cron job de arq** (lun-vie 09:00 UTC-3,
+`unique=True` → idempotente por horario) en el mismo worker (sin servicio nuevo). Lee PRs
+abiertos de los repos de la allowlist y postea a Discord vía **webhook** (`discord_client.py`,
+parte en trozos de 2000). SIN approval gate (solo lee GitHub + publica en nuestro canal).
+Nuevos: `discord_client.py`, `jobs/digest.py`, `github_client.list_open_pull_requests`,
+`guardrails.allowed_repos`. Determinista (sin LLM).
+
+PASOS MANUALES para validar:
+1. Crear webhook entrante en `#dev` → cargar `DISCORD_DIGEST_WEBHOOK_URL` en `~/.hermes/.env`.
+2. `git pull` de la branch en el VPS + `sudo systemctl restart hermes-arq-worker`.
+3. Disparar el digest a mano (heredoc en `docs/runbook.md`, sección "Digest diario") y
+   verificar el mensaje en `#dev`.
+
+Checklist (validado en vivo):
+- [x] El digest se postea en Discord (canal `#digest`) con los PRs abiertos — disparo manual
+  listó el PR #7 con su antigüedad; webhook devolvió HTTP 204.
+- [x] El worker arranca con el cron cargado, sin errores.
+- [~] Idempotencia por horario: garantizada por `unique=True` de arq (no se probó el reinicio
+  exacto a las 9:00; el mecanismo está verificado).
+
+Pendiente (Fase 6b): los otros 4 workflows del inventario (issue alert + deploy notif por
+poll cada 5 min con cursor en Redis; stale PR cron 10:00; weekly cron viernes 18:00).
 
 ### Fase 5 — capacidades (COMPLETA, validada 2026-06-23 — ver ADR-0008)
 
