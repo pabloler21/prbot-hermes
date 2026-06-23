@@ -6,88 +6,107 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Operations repo (`team-agent-ops`) for **deploying and configuring Hermes Agent (Nous Research)** on an Ubuntu VPS, wiring it to GitHub (via MCP) and Discord, running durable work through **arq + Redis**, and **migrating an existing n8n bot** onto it before retiring n8n.
 
-This is a **portfolio/demo project**: the author must be able to explain and defend every part in interviews, and **the author's stack is Python** — this is a binding constraint that shapes technical decisions (see ADR-0006).
+This is a **portfolio/demo project**: the author must be able to explain and defend every part in interviews, and **the author's stack is Python** — a binding constraint that shapes technical decisions (see ADR-0006). Prefer Python + tools the author can defend; don't introduce a stack they can't explain.
 
 Hermes is operated as a dependency — **do not fork it**. What gets versioned here is the configuration, the business guardrails, and the arq queues/workers. `plan-1-agente-hermes.md` is the authoritative, phase-by-phase execution plan. Read it before acting.
 
-## Current state (updated 2026-06-21)
+## Current state (updated 2026-06-22)
 
-- **Phase 0 (bootstrap):** ✅ complete, merged to `main`.
-- **Phase 1 (Hermes live on Discord):** ✅ complete, validated on VPS, merged to `main`.
-- **Phase 2 (n8n inventory + migration map):** ✅ complete, merged to `main`. Inventory is *invented* (realistic team workflows) — the author has no real n8n access; we build the migration as if real for a portfolio/demo. See `docs/n8n-inventory.md`.
-- **Phase 3a (GitHub MCP, read-only):** ✅ complete, validated. On branch `feat/f3-github-mvp` (NOT yet merged — Phase 3 closes only when 3b is done).
-- **Redis (3b prerequisite):** ✅ installed and secured on the VPS (manual step). Bound to `127.0.0.1` + `::1` only (not internet-facing), `requirepass` set, `REDIS_URL` loaded in `~/.hermes/.env` (chmod 600). Verified: `redis-cli -u "$REDIS_URL" ping` → `PONG`.
-- **Phase 3b (write path: approval-gated worker):** ✅ COMPLETE, validated end-to-end on the VPS (2026-06-22). On `feat/f3-github-mvp` (PR #1, ready to merge). Queue layer is **Python + arq** (ADR-0006, supersedes ADR-0005), in `hermes_queue/`: `settings.py`, `jobs/post_comment.py` (producer + approval gate Enfoque B), `guardrails.py` (allowlist), `github_client.py`, `events.py` (pub/sub), `workers/post_comment_worker.py`, `mcp_server.py` (Hermes tool `propose_pr_comment`), `approval_bot.py` (Discord ✅/❌ bot). Runs as systemd units `hermes-arq-worker` + `hermes-approval-bot`. Validated flow: user (DM) → Hermes → MCP tool → pending → approval bot → approve → worker posts to GitHub. **Known minor follow-up:** Hermes only replies in DM, not the server channel (home-channel quirk, not blocking).
+- **Phase 0 (bootstrap):** ✅ merged to `main`.
+- **Phase 1 (Hermes live on Discord):** ✅ merged to `main`.
+- **Phase 2 (n8n inventory + migration map):** ✅ merged to `main`. Inventory is *invented* (realistic team workflows) — the author has no real n8n access; we build the migration as if real for a portfolio/demo. See `docs/n8n-inventory.md`.
+- **Phase 3 (GitHub MVP: read MCP + approval-gated write path):** ✅ **COMPLETE, validated end-to-end on the VPS, merged to `main`** (PR #1). 3a = GitHub MCP read-only; 3b = the Python/arq write path with approval gate. Validated flow: user (DM) → Hermes → MCP tool `propose_pr_comment` → pending → Discord approval bot (✅/❌) → arq worker posts the comment to GitHub. Allowlist rejection, idempotency, and error handling confirmed live.
+- **Phase 4 (next):** migrate n8n workflows to **arq `cron_jobs`** (daily digests, PR alerts), reusing the queue infra already deployed.
 
-**VPS:** Oracle Cloud Always Free, VM.Standard.E2.1.Micro (AMD x86, **1GB RAM** — resource-constrained, factor this into every choice), Ubuntu 22.04, IP `137.131.202.213`. Connect: `ssh ubuntu@137.131.202.213`. Hermes runs as user `hermes`; binary at `/home/hermes/.hermes/hermes-agent/venv/bin/hermes`. Redis runs locally (127.0.0.1:6379, password-protected). Operator cheatsheet: `CHEATSHEET.md` (gitignored, personal).
+**Known minor follow-up (non-blocking):** Hermes currently replies only in DM, not in the server channel (home-channel quirk — see `DISCORD_HOME_CHANNEL`).
+
+**VPS:** Oracle Cloud Always Free, VM.Standard.E2.1.Micro (AMD x86, **1GB RAM** — resource-constrained, factor into every choice), Ubuntu 22.04, IP `137.131.202.213`. Connect: `ssh ubuntu@137.131.202.213`. Operator cheatsheet: `CHEATSHEET.md` (gitignored, personal).
 
 **Demo thesis:** Hermes on Discord answers the team's questions about code/PRs/CI-failures (reads GitHub via MCP); arq+Redis runs recurring work and approval-gated GitHub writes (digests, alerts, comments), replacing n8n.
 
-## Operating rules (from the plan — these are binding)
+## Operating rules (from the plan — binding)
 
-- **One phase at a time.** Do not advance past a phase without satisfying its validation checklist.
-- **On closing each phase:** update `HANDOFF.md` and add an `ADR-XXXX` under `docs/adr/`.
-- **MANUAL STEPS (`PASOS MANUALES`) are done by the human, not by Claude Code.** Leave them clearly indicated and wait — do not execute them. These cover: provisioning the VPS, installing Hermes, creating the Discord bot/token, generating the scoped GitHub PAT, installing Redis (done), and disabling/decommissioning n8n.
-- **If a fact is missing, assume the reasonable default and record the assumption explicitly in an ADR.** Do not stop to ask.
+- **One phase at a time.** Don't advance past a phase without satisfying its validation checklist.
+- **On closing each phase:** update `HANDOFF.md` and add/confirm an `ADR-XXXX` under `docs/adr/`. Merge to `main` only when the checklist is complete.
+- **MANUAL STEPS (`PASOS MANUALES`) are done by the human, not by Claude Code.** Leave them clearly indicated and wait. These cover: provisioning the VPS, installing Hermes, creating Discord bots/tokens, generating/scoping the GitHub PAT, installing Redis (done), and decommissioning n8n.
+- **If a fact is missing, assume the reasonable default and record the assumption in an ADR.** Don't stop to ask.
 - **Secrets** live only in `~/.hermes/.env` (or the service environment), `chmod 600`. Never hardcoded, never committed. `deploy/.env.example` lists variable names with no values.
 
 ## Language & commit conventions
 
-- **Code in English. Comments and docstrings in Spanish. Commit messages in English**, following Conventional Commits.
-- Python tooling uses **uv** + **Ruff**. Lint with `uv run ruff check`. Add deps with `uv add <pkg>` (pins the current version into `uv.lock` — never hand-write versions from memory).
+- **Code in English. Comments and docstrings in Spanish. Commit messages in English**, Conventional Commits.
+- Python tooling: **uv** + **Ruff**. Lint with `uv run ruff check`; **also** `uv run ruff format` before pushing (CI runs `ruff format --check` separately — see lessons). Add deps with `uv add <pkg>` (pins the current version — never hand-write versions from memory).
 
 ## Branching
 
-- `main` always reflects the deployed configuration.
-- One **feature branch per phase**: `feat/fX-nombre`. Merge to `main` only when that phase's checklist is complete.
-- Every merge updates `HANDOFF.md` and adds the corresponding ADR(s).
+- `main` reflects the deployed configuration (now includes Phase 3).
+- One **feature branch per phase**: `feat/fX-nombre`. Merge to `main` only when the checklist is complete. Every merge updates `HANDOFF.md` + ADR(s).
 
 ## Architecture (how the pieces fit)
 
-- **Hermes Agent** = the brain. Receives Discord messages, reasons, decides, and has tools (GitHub MCP, docs reading). Runs as a 24/7 headless gateway on the VPS (systemd, non-root user).
-- **arq (Redis)** = the durable execution layer. Any work that acts on GitHub, or is recurring/critical, is enqueued as an arq job. The worker consumes it with retries, exponential backoff, and idempotency (job uniqueness via custom `_job_id`), so work survives VPS reboots, is not duplicated, and is retried on transient failures.
-- **Core pattern:** Hermes decides and **enqueues** a job → an **arq worker** executes the action (e.g. post the approved comment, build the digest) → result is logged and reported back to the Discord channel.
-- **Single scheduling mechanism:** recurring work (e.g. daily digest) uses **arq `cron_jobs`**, not a second cron. Avoid running Hermes-native cron and arq cron in parallel; if a purely conversational recurring task belongs in Hermes' native cron, document that exception in an ADR.
+- **Hermes Agent** = the brain. Receives Discord messages, reasons, decides, has tools (GitHub MCP read-only, the custom `hermes-queue` MCP, docs reading). Runs 24/7 as a headless gateway (systemd, non-root).
+- **arq (Redis)** = the durable execution layer. Work that acts on GitHub or is recurring/critical is enqueued as an arq job. The worker consumes it with retries, exponential backoff, and idempotency (job uniqueness via custom `_job_id`), so work survives reboots, isn't duplicated, and is retried on transient failures.
+- **Core pattern:** Hermes decides and **enqueues** → an **arq worker** executes (post the approved comment, build the digest) → result is logged and reported back to Discord.
+- **Single scheduling mechanism:** recurring work uses **arq `cron_jobs`**, not a second cron. Avoid running Hermes-native cron and arq cron in parallel; document any exception in an ADR.
 
 ### Two guardrails that are easy to get wrong
 
-- **Approval gate for published actions is orchestration-level, NOT Hermes-native.** Hermes' native `approvals.mode` only covers dangerous shell commands — it does **not** cover an MCP action like "post a GitHub comment." So visible actions (comments/messages) are held in a **pending-approval** state (Enfoque B: a Redis key `pending-approval:<id>`, **not** the arq execution queue); an allowlisted user approves via Discord (yes/no); only then is the real arq job enqueued and the worker executes. The arq queue therefore *structurally* only ever contains approved work.
-- **Repo allowlist is enforced in the worker (deterministic layer), not in the LLM.** Which repos may be written to is a deterministic decision, validated in the arq worker (`config/guardrails/repo-allowlist.yaml`).
+- **Approval gate is orchestration-level, NOT Hermes-native.** Hermes' native `approvals.mode` only covers dangerous shell commands — NOT an MCP action like "post a GitHub comment." So visible actions are held **pending-approval** (Enfoque B: a Redis key `pending-approval:<id>`, **not** the arq queue); an allowlisted user approves via the Discord approval bot (✅/❌); only then is the real arq job enqueued. The arq queue therefore *structurally* only ever contains approved work. The approval decision is deterministic (a human clicking a button), never the LLM reading "yes".
+- **Repo allowlist is enforced in the worker (deterministic), not in the LLM** (`config/guardrails/repo-allowlist.yaml`).
 
-Additional defense-in-depth: the GitHub PAT is scoped to read + comment only (no merge/push/force-push). The idempotency key (sha256 of `repo+pr+body`, used as the arq `_job_id`) prevents a 24/7 retrying agent from duplicating actions — arq returns `None` if the id is already queued/running.
+Defense-in-depth: the GitHub PAT is scoped to read + comment only (no merge/push/force-push). The idempotency key (sha256 of `repo+pr+body`, used as the arq `_job_id`) prevents a 24/7 retrying agent from duplicating actions — arq returns `None` if the id is already queued/running.
 
 ## Repo structure
 
 ```
-docs/adr/          # ADR-0001..., one+ per phase
+docs/adr/          # ADR-0001..0006, one+ per phase
 docs/n8n-inventory.md, docs/runbook.md
-config/hermes/     # config.yaml: intent/doc artifact only (the LIVE config is on the VPS)
-config/guardrails/ # repo allowlist, publish-approval policy
-hermes_queue/      # arq task queue (Python): settings.py, jobs/, workers/
-deploy/systemd/    # units: hermes-gateway, arq worker
+config/hermes/     # config.yaml: intent/doc artifact only (LIVE config is on the VPS)
+config/guardrails/ # repo-allowlist.yaml, publish-approval policy
+hermes_queue/      # arq queue layer (Python):
+  settings.py        # RedisSettings from REDIS_URL
+  jobs/post_comment.py  # data type + idempotency + approval gate (enqueue_pending/approve/reject)
+  guardrails.py      # repo allowlist (deterministic)
+  github_client.py   # POST a PR comment via GitHub REST API
+  events.py          # Redis pub/sub (MCP -> approval bot)
+  workers/post_comment_worker.py  # arq worker: allowlist + post + retries
+  mcp_server.py      # FastMCP server: tool propose_pr_comment for Hermes
+  approval_bot.py    # discord.py bot: ✅/❌ buttons (deterministic gate)
+deploy/systemd/    # units: hermes-gateway, hermes-arq-worker, hermes-approval-bot
 deploy/.env.example, deploy/install-notes.md
 scripts/
 ```
 
+## Operational facts (deployed system on the VPS)
+
+- **Two Linux users — use the right one.** `hermes` **runs the app** (owns the repo at `/home/hermes/prbot-hermes`, the venv, and `~/.hermes/.env`; has NO sudo). `ubuntu` is for **system admin** (`sudo`, `systemctl`, `journalctl`). If `sudo` asks for a password or you see `/home/ubuntu/...: No such file`, you're on the wrong user — switch with `sudo su - hermes` / `exit`.
+- **Services (all run as `hermes`, via systemd):** `hermes-gateway` (Hermes + its MCP servers), `hermes-arq-worker` (post-comment worker), `hermes-approval-bot` (Discord ✅/❌ bot), plus `redis-server`. Worker/bot units call the venv binaries directly (`.venv/bin/arq`, `.venv/bin/python`) — no `uv` needed at runtime.
+- **Custom MCP registration:** the `hermes-queue` MCP is registered with `hermes mcp add hermes-queue --command /home/hermes/prbot-hermes/.venv/bin/python --env PYTHONPATH=/home/hermes/prbot-hermes REDIS_URL='${REDIS_URL}' --args -m hermes_queue.mcp_server`. The `PYTHONPATH` env is required so the spawned process finds the `hermes_queue` package (the project is not pip-installed into the venv). `${REDIS_URL}` is resolved by Hermes at runtime from `~/.hermes/.env`.
+- **Approval bot** is a **separate Discord application/token** (`DISCORD_APPROVAL_BOT_TOKEN`) — Hermes isn't forked, so custom buttons live in their own bot. It posts in `DISCORD_APPROVAL_CHANNEL_ID`; approvers = `DISCORD_ALLOWED_USERS`. The bot must be **invited to the server** (OAuth2 `bot` scope) — connecting to the gateway ≠ being a server member.
+
 ## Decisions already made (do not re-litigate)
 
-- **Worker/queue language:** **Python + arq** (ADR-0006, supersedes ADR-0005). Chosen for defensibility in the author's stack and the 1GB free VPS (arq is async, Redis-native, tiny footprint, with native cron/retries/idempotency). BullMQ/TypeScript was discarded; the Python package is named `hermes_queue` (not `queue`) to avoid shadowing the stdlib `queue` module.
-- **LLM:** provider **OpenCode** (user's Go subscription), model **`kimi-k2.7-code`**. Key in `~/.hermes/.env` as `OPENCODE_GO_API_KEY`. OpenRouter was discarded (ADR-0002).
+- **Worker/queue language:** **Python + arq** (ADR-0006, supersedes ADR-0005). Chosen for defensibility in the author's stack and the 1GB free VPS (arq is async, Redis-native, tiny footprint, with native cron/retries/idempotency; verified vs Celery/RQ/Dramatiq). BullMQ/TypeScript was discarded. The Python package is `hermes_queue` (not `queue`) to avoid shadowing the stdlib `queue` module.
+- **LLM:** provider **OpenCode** (user's Go subscription), model **`kimi-k2.7-code`**. Key in `~/.hermes/.env` as **`OPENCODE_GO_API_KEY`** (the real var name on the VPS). OpenRouter was discarded (ADR-0002).
 
 ## Confirmed facts about Hermes (do not re-verify)
 
 Confirmed against the docs and **reconciled against the real install on the VPS**:
-- Headless VPS install via `curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash`.
-- **MCP servers are managed via the `hermes mcp` CLI (`add`/`configure`/`list`/`catalog`), NOT a `mcp_servers` block in `config.yaml`.** The PAT is passed as an env reference `--env GITHUB_PERSONAL_ACCESS_TOKEN='${GITHUB_PAT}'`; Hermes resolves `${GITHUB_PAT}` at runtime from `~/.hermes/.env` (verified), so the secret is never hardcoded. The GitHub MCP (`@modelcontextprotocol/server-github`) exposes 26 tools; **we locked it to 14 read-only tools** via `hermes mcp configure` (12 write tools disabled) so the only publish path is the approval-gated worker.
-- The real generated config uses top-level keys `model:`, `discord:`, `approvals:`, `terminal:` (NOT `llm:`/`channels:`). The repo's `config/hermes/config.yaml` is an intent/doc artifact, not the live file — do not overwrite the installer-generated `~/.hermes/config.yaml` wholesale; edit deltas only.
-- Discord: user allowlist via `DISCORD_ALLOWED_USERS`; native yes/no approval buttons. Without an allowlist Hermes denies everyone. Privileged Gateway Intents (Presence, Server Members, Message Content) must be enabled manually in the Discord Developer Portal.
+- Headless VPS install via `curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash`. Binary at `/home/hermes/.hermes/hermes-agent/venv/bin/hermes`.
+- **MCP servers are managed via the `hermes mcp` CLI (`add`/`configure`/`list`), NOT a `mcp_servers` block in `config.yaml`.** The GitHub MCP (`@modelcontextprotocol/server-github`) was locked to **14 read-only tools** (12 write tools disabled) so the only publish path is the approval-gated worker. Hermes spawns all registered MCPs as child processes of the gateway.
+- The real generated config uses top-level keys `model:`, `discord:`, `approvals:`, `terminal:` (NOT `llm:`/`channels:`). The repo's `config/hermes/config.yaml` is an intent/doc artifact — edit the live `~/.hermes/config.yaml` deltas only, don't overwrite wholesale.
+- **Discord:** user allowlist via `DISCORD_ALLOWED_USERS`. Hermes replies in **DMs and its home channel** (set with `/sethome`); after restarts it may revert to DM-only. Privileged Gateway Intents (Presence, Server Members, Message Content) must be enabled manually in the Developer Portal.
 - systemd unit needs `TimeoutStopSec>=210` (Hermes `restart_drain_timeout` is 180s; the 90s default SIGKILLs mid-drain).
-- Native cron with `approvals.cron_mode` (deny|approve); sandbox backends `ssh`/`docker`; `approvals.mode` (manual|smart|off) covers dangerous shell commands only (NOT MCP actions).
+- `approvals.cron_mode` (deny|approve); sandbox backends `ssh`/`docker`; `approvals.mode` (manual|smart|off) covers dangerous shell commands only (NOT MCP actions).
 
 ## Mistakes not to repeat (lessons paid for in this project)
 
-- **Never assert volatile tech facts from training memory — verify first.** Real failure: claimed "BullMQ's Python port is an immature third-party project" from memory; it is actually official (Taskforce.sh), and a later check showed its real gaps were different (no schedulers/retries/events). Route verification: **Context7 MCP** for library docs/capabilities/syntax; **web search** for project status, comparisons, pricing, versions. Tag claims ✅ verified (source + date) vs ⚠️ from memory.
-- **Define the deciding criterion BEFORE evaluating options.** Real failure: ADR-0005 picked TypeScript by optimizing "best queue tech," ignoring the criteria that actually bind here — defensibility in the author's Python stack + the 1GB free VPS. Surfacing those first (ADR-0006) reversed the decision and avoided building a whole subsystem the author couldn't defend. For this project, weigh **Python-stack defensibility and resource cost** explicitly in every tooling choice.
-- **Don't fragment a cohesive subsystem across languages by feature gaps.** Split by service boundary, not by "what library X is missing." (Why the Python-producer/TS-worker hybrid was rejected — ADR-0006.)
-- **Don't name a Python package after a stdlib module** (`queue`, `json`, `types`, …). It shadows the import and breaks dependencies subtly. Hence `hermes_queue`.
+- **Never assert volatile tech facts from training memory — verify first.** Real failures: claimed BullMQ's Python port was "an immature third-party project" (it's official); would have written the GitHub API version, the FastMCP class, and library versions from stale memory. Route verification: **Context7 MCP** for library docs/capabilities/syntax; **web search** for project status, comparisons, pricing, versions. Tag claims ✅ verified (source + date) vs ⚠️ from memory. (Also in the user's global CLAUDE.md.)
+- **Define the deciding criterion BEFORE evaluating options.** ADR-0005 picked TypeScript by optimizing "best queue tech," ignoring the criteria that actually bind here — Python-stack defensibility + the 1GB VPS. Surfacing those first (ADR-0006) reversed the decision. Weigh defensibility and resource cost explicitly in every tooling choice.
+- **Don't fragment a cohesive subsystem across languages by feature gaps.** Split by service boundary, not by "what library X is missing" (why the Python-producer/TS-worker hybrid was rejected).
+- **Don't name a Python package after a stdlib module** (`queue`, `json`, `types`, …) — it shadows the import and breaks deps subtly. Hence `hermes_queue`.
+- **Scope the GitHub PAT for the actual ACTION.** A read-only PAT → `403 "Resource not accessible by personal access token"` when posting. Commenting on a PR needs **Pull requests: Read and write** (and Issues: Read and write). Fine-grained tokens can be edited in place (the token value stays the same → no `.env` change).
+- **Run app commands as `hermes`, sudo as `ubuntu`.** Wrong user → `/home/ubuntu/...: No such file` or a sudo password prompt (the `hermes` user is `--disabled-password`).
+- **`ruff check` (lint) ≠ `ruff format` (style).** CI runs both; run `uv run ruff format` before pushing or the `format --check` job fails even when lint passes.
+- **A bot connected to the Discord gateway is not automatically in your server.** Custom bots must be invited via the OAuth2 `bot` scope URL, or they can't post in any channel.
 - **The earlier `mcp_servers`-in-`config.yaml` assumption was wrong** (corrected in ADR-0004): MCP is CLI-managed. Don't reintroduce it.
