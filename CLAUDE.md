@@ -10,13 +10,14 @@ This is a **portfolio/demo project**: the author must be able to explain and def
 
 Hermes is operated as a dependency — **do not fork it**. What gets versioned here is the configuration, the business guardrails, and the arq queues/workers. `plan-1-agente-hermes.md` is the authoritative, phase-by-phase execution plan. Read it before acting.
 
-## Current state (updated 2026-06-22)
+## Current state (updated 2026-06-23)
 
 - **Phase 0 (bootstrap):** ✅ merged to `main`.
 - **Phase 1 (Hermes live on Discord):** ✅ merged to `main`.
 - **Phase 2 (n8n inventory + migration map):** ✅ merged to `main`. Inventory is *invented* (realistic team workflows) — the author has no real n8n access; we build the migration as if real for a portfolio/demo. See `docs/n8n-inventory.md`.
 - **Phase 3 (GitHub MVP: read MCP + approval-gated write path):** ✅ **COMPLETE, validated end-to-end on the VPS, merged to `main`** (PR #1). 3a = GitHub MCP read-only; 3b = the Python/arq write path with approval gate. Validated flow: user (DM) → Hermes → MCP tool `propose_pr_comment` → pending → Discord approval bot (✅/❌) → arq worker posts the comment to GitHub. Allowlist rejection, idempotency, and error handling confirmed live.
-- **Phase 4 (next):** harden the durable queue as a production service. Per the plan this is **NOT** the n8n migration (that's Phase 6). Most of it was already built in 3b (Redis secured + worker/bot as systemd services with retries/backoff). Genuinely remaining: **dead-letter** for jobs that exhaust retries (arq has no native DLQ — we build it), **concurrency cap** (`max_jobs`) as rate-limiting, a formal **reboot-survival** test of the new services, and queue **observability/runbook**. Later: Phase 5 = issue triage + doc reading; Phase 6 = daily digest (`cron_jobs`) + n8n parity; Phase 7 = cutover.
+- **Phase 4 (durable-queue hardening):** ✅ **COMPLETE, validated end-to-end on the VPS, merged to `main`** (PR #3). Added a **dead-letter queue** (arq has none native — Redis list `dead-letter:post_comment`, capped, with manual requeue), a **concurrency cap** (`max_jobs=2`) as rate-limiting (arq has no QPS token-bucket; the human approval gate already throttles writes), and validated **reboot-survival** of the worker/bot services. See ADR-0007. NB: per the plan, Phase 4 was queue-infra hardening, **NOT** the n8n migration (that's Phase 6).
+- **Phase 5 (next):** Hermes capabilities — **issue triage + documentation reading**, reusing the approval gate for any write action (labelling, commenting). First phase with automatic *poll* workers → this is where per-QPS rate-limiting gets revisited (today handled by the concurrency cap). Later: Phase 6 = daily digest (`cron_jobs`) + n8n parity; Phase 7 = cutover (retire n8n).
 
 **Known minor follow-up (non-blocking):** Hermes currently replies only in DM, not in the server channel (home-channel quirk — see `DISCORD_HOME_CHANNEL`).
 
@@ -45,7 +46,7 @@ Hermes is operated as a dependency — **do not fork it**. What gets versioned h
 ## Architecture (how the pieces fit)
 
 - **Hermes Agent** = the brain. Receives Discord messages, reasons, decides, has tools (GitHub MCP read-only, the custom `hermes-queue` MCP, docs reading). Runs 24/7 as a headless gateway (systemd, non-root).
-- **arq (Redis)** = the durable execution layer. Work that acts on GitHub or is recurring/critical is enqueued as an arq job. The worker consumes it with retries, exponential backoff, and idempotency (job uniqueness via custom `_job_id`), so work survives reboots, isn't duplicated, and is retried on transient failures.
+- **arq (Redis)** = the durable execution layer. Work that acts on GitHub or is recurring/critical is enqueued as an arq job. The worker consumes it with retries, exponential backoff, and idempotency (job uniqueness via custom `_job_id`), so work survives reboots, isn't duplicated, and is retried on transient failures. Inside a task, the arq pool is available as `ctx["redis"]`. Jobs that fail permanently (4xx, repo-not-allowed) or exhaust retries go to a **Redis-list dead-letter** (`hermes_queue/deadletter.py`) instead of vanishing — arq has no native DLQ. Concurrency is capped (`max_jobs`) as rate-limiting; arq has no native per-QPS limiter. See ADR-0007.
 - **Core pattern:** Hermes decides and **enqueues** → an **arq worker** executes (post the approved comment, build the digest) → result is logged and reported back to Discord.
 - **Single scheduling mechanism:** recurring work uses **arq `cron_jobs`**, not a second cron. Avoid running Hermes-native cron and arq cron in parallel; document any exception in an ADR.
 
@@ -69,7 +70,8 @@ hermes_queue/      # arq queue layer (Python):
   guardrails.py      # repo allowlist (deterministic)
   github_client.py   # POST a PR comment via GitHub REST API
   events.py          # Redis pub/sub (MCP -> approval bot)
-  workers/post_comment_worker.py  # arq worker: allowlist + post + retries
+  deadletter.py      # dead-letter queue (Redis list) + manual requeue (arq has no native DLQ)
+  workers/post_comment_worker.py  # arq worker: allowlist + post + retries + dead-letter
   mcp_server.py      # FastMCP server: tool propose_pr_comment for Hermes
   approval_bot.py    # discord.py bot: ✅/❌ buttons (deterministic gate)
 deploy/systemd/    # units: hermes-gateway, hermes-arq-worker, hermes-approval-bot
@@ -110,3 +112,7 @@ Confirmed against the docs and **reconciled against the real install on the VPS*
 - **`ruff check` (lint) ≠ `ruff format` (style).** CI runs both; run `uv run ruff format` before pushing or the `format --check` job fails even when lint passes.
 - **A bot connected to the Discord gateway is not automatically in your server.** Custom bots must be invited via the OAuth2 `bot` scope URL, or they can't post in any channel.
 - **The earlier `mcp_servers`-in-`config.yaml` assumption was wrong** (corrected in ADR-0004): MCP is CLI-managed. Don't reintroduce it.
+- **Verify phase SCOPE against `plan-1-agente-hermes.md`, not memory.** Real failure: wrote "Phase 4 = migrate n8n to cron" in CLAUDE.md/HANDOFF from memory — the plan says Phase 4 = durable-queue hardening; the n8n migration is Phase 6. The anti-staleness discipline applies to *internal docs too*: the plan is the authoritative source for phase boundaries, read it before asserting what a phase is.
+- **Don't assume a queue library has dead-letter / rate-limiting — verify.** Confirmed via Context7: **arq has no native dead-letter queue** (jobs past `max_tries` are marked failed and the payload is discarded) and **no per-QPS rate-limiter** (only `max_jobs` concurrency + `poll_delay`). We built the DLQ as a Redis list and use the concurrency cap as the throttle. `raise Retry` on the *last* attempt does NOT save the payload — detect the last try (`ctx["job_try"] >= max_tries`) and record to the DLQ yourself.
+- **Push the feature branch before deploying it on the VPS.** `git checkout <branch>` on the VPS failed with `pathspec did not match` because the branch was still local-only. Push first, then `git fetch && git checkout` on the VPS.
+- **`systemctl`/`journalctl` only exist on the VPS, not in local PowerShell.** After `sudo reboot` the SSH session drops; reconnect with `ssh ubuntu@<ip>` before running service checks (running them in the local Windows shell errors with `command not found`).
