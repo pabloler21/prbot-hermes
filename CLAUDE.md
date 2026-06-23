@@ -17,7 +17,7 @@ Hermes is operated as a dependency — **do not fork it**. What gets versioned h
 - **Phase 2 (n8n inventory + migration map):** ✅ merged to `main`. Inventory is *invented* (realistic team workflows) — the author has no real n8n access; we build the migration as if real for a portfolio/demo. See `docs/n8n-inventory.md`.
 - **Phase 3 (GitHub MVP: read MCP + approval-gated write path):** ✅ **COMPLETE, validated end-to-end on the VPS, merged to `main`** (PR #1). 3a = GitHub MCP read-only; 3b = the Python/arq write path with approval gate. Validated flow: user (DM) → Hermes → MCP tool `propose_pr_comment` → pending → Discord approval bot (✅/❌) → arq worker posts the comment to GitHub. Allowlist rejection, idempotency, and error handling confirmed live.
 - **Phase 4 (durable-queue hardening):** ✅ **COMPLETE, validated end-to-end on the VPS, merged to `main`** (PR #3). Added a **dead-letter queue** (arq has none native — Redis list `dead-letter:post_comment`, capped, with manual requeue), a **concurrency cap** (`max_jobs=2`) as rate-limiting (arq has no QPS token-bucket; the human approval gate already throttles writes), and validated **reboot-survival** of the worker/bot services. See ADR-0007. NB: per the plan, Phase 4 was queue-infra hardening, **NOT** the n8n migration (that's Phase 6).
-- **Phase 5 (next):** Hermes capabilities — **issue triage + documentation reading**, reusing the approval gate for any write action (labelling, commenting). First phase with automatic *poll* workers → this is where per-QPS rate-limiting gets revisited (today handled by the concurrency cap). Later: Phase 6 = daily digest (`cron_jobs`) + n8n parity; Phase 7 = cutover (retire n8n).
+- **Phase 5 (issue triage + documentation reading):** 🚧 **IMPLEMENTED on `feat/f5-issue-triage`, pending live VPS validation** (do not mark complete/merge until the checklist passes). Reactive (Discord-triggered), reuses the approval gate. Commenting on issues already worked (`propose_pr_comment` serves PR *and* issue — same endpoint); reading issues/docs already worked via the read-only MCP. The only new write action is **applying labels**: tool `propose_issue_labels` → gate → task `apply_issue_labels` in the same worker. The approval gate was **generalized to be action-agnostic** (pending record carries `{task, data}`; bot shows a pre-formatted `summary`); DLQ is now per-task (`dead-letter:<task>`). See ADR-0008. **NB: Phase 5 is reactive — it does NOT add poll workers.** The first automatic/recurring work (and the per-QPS rate-limiting revisit) is **Phase 6** (daily digest via `cron_jobs`). Later: Phase 7 = cutover (retire n8n).
 
 **Known minor follow-up (non-blocking):** Hermes currently replies only in DM, not in the server channel (home-channel quirk — see `DISCORD_HOME_CHANNEL`).
 
@@ -60,20 +60,22 @@ Defense-in-depth: the GitHub PAT is scoped to read + comment only (no merge/push
 ## Repo structure
 
 ```
-docs/adr/          # ADR-0001..0006, one+ per phase
+docs/adr/          # ADR-0001..0008, one+ per phase
 docs/n8n-inventory.md, docs/runbook.md
 config/hermes/     # config.yaml: intent/doc artifact only (LIVE config is on the VPS)
 config/guardrails/ # repo-allowlist.yaml, publish-approval policy
 hermes_queue/      # arq queue layer (Python):
   settings.py        # RedisSettings from REDIS_URL
-  jobs/post_comment.py  # data type + idempotency + approval gate (enqueue_pending/approve/reject)
+  jobs/gate.py       # generic, action-agnostic approval gate (enqueue_pending/approve/reject; pending = {task, data})
+  jobs/post_comment.py  # PostCommentRequest data type + idempotency key
+  jobs/apply_labels.py  # ApplyLabelsRequest data type + idempotency key (Phase 5)
   guardrails.py      # repo allowlist (deterministic)
-  github_client.py   # POST a PR comment via GitHub REST API
-  events.py          # Redis pub/sub (MCP -> approval bot)
-  deadletter.py      # dead-letter queue (Redis list) + manual requeue (arq has no native DLQ)
-  workers/post_comment_worker.py  # arq worker: allowlist + post + retries + dead-letter
-  mcp_server.py      # FastMCP server: tool propose_pr_comment for Hermes
-  approval_bot.py    # discord.py bot: ✅/❌ buttons (deterministic gate)
+  github_client.py   # POST a PR/issue comment + add issue labels via GitHub REST API
+  events.py          # Redis pub/sub (MCP -> approval bot); publishes {kind, summary}
+  deadletter.py      # per-task dead-letter (Redis list dead-letter:<task>) + manual requeue (arq has no native DLQ)
+  workers/post_comment_worker.py  # arq worker: tasks post_comment + apply_issue_labels (allowlist + act + retries + dead-letter)
+  mcp_server.py      # FastMCP server: tools propose_pr_comment + propose_issue_labels for Hermes
+  approval_bot.py    # discord.py bot: ✅/❌ buttons (deterministic, action-agnostic gate)
 deploy/systemd/    # units: hermes-gateway, hermes-arq-worker, hermes-approval-bot
 deploy/.env.example, deploy/install-notes.md
 scripts/
@@ -116,3 +118,5 @@ Confirmed against the docs and **reconciled against the real install on the VPS*
 - **Don't assume a queue library has dead-letter / rate-limiting — verify.** Confirmed via Context7: **arq has no native dead-letter queue** (jobs past `max_tries` are marked failed and the payload is discarded) and **no per-QPS rate-limiter** (only `max_jobs` concurrency + `poll_delay`). We built the DLQ as a Redis list and use the concurrency cap as the throttle. `raise Retry` on the *last* attempt does NOT save the payload — detect the last try (`ctx["job_try"] >= max_tries`) and record to the DLQ yourself.
 - **Push the feature branch before deploying it on the VPS.** `git checkout <branch>` on the VPS failed with `pathspec did not match` because the branch was still local-only. Push first, then `git fetch && git checkout` on the VPS.
 - **`systemctl`/`journalctl` only exist on the VPS, not in local PowerShell.** After `sudo reboot` the SSH session drops; reconnect with `ssh ubuntu@<ip>` before running service checks (running them in the local Windows shell errors with `command not found`).
+- **Check what already works before writing code.** In Phase 5, "comment on issues" and "read docs/issues" needed *zero* new code: a PR is an issue for the API (`/issues/{n}/comments` and `propose_pr_comment` already serve issues), and the read-only MCP already reads files/issues (validated in 3a). The only genuinely new thing was applying labels. Scope a phase by what's missing, not by re-listing what the plan names.
+- **Generalize a gate by carrying the action, not by duplicating it.** Adding a second write action (labels) didn't fork the approval bot or the gate: the pending record now carries `{task, data}` and the bot shows a pre-formatted `summary`, so gate/bot stay action-agnostic. Adding a future action = new tool + new request type + a worker function, nothing else.

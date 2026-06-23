@@ -60,19 +60,22 @@ set -a; source ~/.hermes/.env; set +a   # exporta REDIS_URL
 
 ### Dead-letter (jobs que fallaron definitivamente)
 
-arq no tiene DLQ nativa: la implementamos como la lista de Redis `dead-letter:post_comment`
-(ver `hermes_queue/deadletter.py` y ADR-0007).
+arq no tiene DLQ nativa: la implementamos como una lista de Redis **por task**,
+`dead-letter:<task>` (ver `hermes_queue/deadletter.py` y ADR-0007). Hoy hay dos:
+`dead-letter:post_comment` y `dead-letter:apply_issue_labels` (Fase 5).
 
 ```bash
-# Cuántos pedidos fallidos hay acumulados
+# Cuántos pedidos fallidos hay acumulados (ajustar la task)
 redis-cli -u "$REDIS_URL" llen dead-letter:post_comment
+redis-cli -u "$REDIS_URL" llen dead-letter:apply_issue_labels
 
 # Ver los más recientes (JSON con ts, reason y data)
 redis-cli -u "$REDIS_URL" lrange dead-letter:post_comment 0 9
 ```
 
-Reintento manual del más reciente (índice 0). Reencola sin `_job_id` a propósito (no lo
-descarta la idempotencia); es seguro porque el DLQ solo contiene trabajo ya aprobado:
+Reintento manual del más reciente (índice 0) de una task. Reencola sin `_job_id` a
+propósito (no lo descarta la idempotencia); es seguro porque el DLQ solo contiene
+trabajo ya aprobado:
 
 ```bash
 .venv/bin/python - <<'PY'
@@ -81,10 +84,12 @@ from arq import create_pool
 from hermes_queue.settings import redis_settings_from_env
 from hermes_queue.deadletter import requeue_dead_letter, list_dead_letters
 
+TASK = "post_comment"  # o "apply_issue_labels"
+
 async def main():
     pool = await create_pool(redis_settings_from_env())
-    print("antes:", await list_dead_letters(pool, 5))
-    job_id = await requeue_dead_letter(pool, index=0)
+    print("antes:", await list_dead_letters(pool, TASK, 5))
+    job_id = await requeue_dead_letter(pool, TASK, index=0)
     print("reencolado:", job_id)
     await pool.aclose()
 

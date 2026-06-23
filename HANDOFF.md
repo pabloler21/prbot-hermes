@@ -4,8 +4,34 @@ Notas de handoff entre fases. Se actualiza al cerrar cada fase.
 
 ## Estado actual
 
+- **Fase 5 — Triage de issues + lectura de docs: IMPLEMENTADA en `feat/f5-issue-triage`,
+  PENDIENTE de validación en el VPS.** No mergear a `main` hasta cumplir el checklist en vivo.
 - **Fase 4 — Infra de cola durable endurecida: COMPLETA y validada en el VPS (2026-06-23).**
   Dead-letter + cap de concurrencia + reboot survival validados en vivo.
+
+### Fase 5 — capacidades (IMPLEMENTADA, pendiente de validar — ver ADR-0008)
+
+Reactiva (disparada por Discord), reusa el approval gate. La fase NO trae poll workers
+(eso es Fase 6). Cambios:
+- **Comentar issues:** ya funcionaba (`propose_pr_comment` sirve para PR e issue); solo se
+  amplió el docstring. **Leer issues/docs:** ya disponible vía la MCP read-only (validado 3a).
+- **Aplicar labels (lo nuevo):** tool `propose_issue_labels` → gate → task `apply_issue_labels`
+  en el mismo worker. `github_client.add_issue_labels` (POST `/issues/{n}/labels`).
+- **Gate generalizado:** el pedido pendiente lleva `{"task", "data"}`; `jobs/gate.py`
+  (genérico) + `jobs/apply_labels.py`. El bot ✅/❌ muestra un `summary` ya formateado
+  (agnóstico de la acción). DLQ por task: `dead-letter:<task>`.
+
+PASOS MANUALES para validar en el VPS (como `hermes`, salvo systemctl como `ubuntu`):
+1. `cd /home/hermes/prbot-hermes && git fetch && git checkout feat/f5-issue-triage && git pull`
+2. (ubuntu) `sudo systemctl restart hermes-gateway hermes-arq-worker` — el gateway re-spawnea
+   la MCP y toma `propose_issue_labels`; el worker toma la task nueva.
+3. **Verificar PAT puede etiquetar** (Issues: write). Si 403 → bumpear permiso del PAT en GitHub.
+
+Checklist de la fase (validar en vivo antes de cerrar):
+- [ ] Triage de un issue real: Hermes propone labels → ✅ por Discord → labels aplicadas.
+- [ ] Comentar un issue (no PR) por el mismo gate.
+- [ ] Acción sobre repo fuera de allowlist → rechazada (al DLQ `dead-letter:apply_issue_labels`).
+- [ ] Lectura de docs del repo como contexto, resumida.
 - **Fase 3 — MVP end-to-end: COMPLETA y validada en el VPS (2026-06-22).** 3a (lectura),
   Redis asegurado, y 3b (escritura: worker arq + approval gate) funcionando end-to-end.
 
@@ -116,12 +142,10 @@ Entregado:
 
 ## Próxima fase
 
-- **Fase 5 — Capacidades: triage de issues + lectura de documentación.** Hermes clasifica/
-  etiqueta issues y responde consultas leyendo docs del repo, reusando el approval gate
-  para cualquier acción de escritura (etiquetar, comentar). Aparecen los primeros workers
-  de *poll* automáticos → ahí se reevalúa el rate-limiting por QPS (hoy resuelto con cap de
-  concurrencia, ver ADR-0007).
-- Roadmap restante: Fase 6 = digest diario (`cron_jobs` de arq) + paridad n8n; Fase 7 =
-  cutover (deshabilitar y retirar n8n).
+- **Fase 6 — Digest diario como job recurrente (`cron_jobs` de arq) + paridad n8n.** Primer
+  trabajo recurrente/automático → **acá** aparece el caudal automático y se reevalúa el
+  rate-limiting por QPS (hoy resuelto con cap de concurrencia, ver ADR-0007). NB: la Fase 5
+  fue reactiva, sin poll workers.
+- Roadmap restante: Fase 7 = cutover (deshabilitar y retirar n8n).
 - **Pendiente menor (no bloqueante):** Hermes hoy responde solo por DM, no en el canal del
   server (quirk del home channel). Revisar `DISCORD_HOME_CHANNEL` en `~/.hermes/.env`.

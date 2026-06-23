@@ -22,7 +22,7 @@ from arq.connections import ArqRedis
 from arq.jobs import Job
 
 from hermes_queue.events import PENDING_CHANNEL
-from hermes_queue.jobs.post_comment import approve, reject
+from hermes_queue.jobs.gate import approve, reject
 from hermes_queue.settings import redis_settings_from_env
 
 
@@ -30,15 +30,6 @@ def _allowed_user_ids() -> set[int]:
     """IDs de Discord autorizados a aprobar (de DISCORD_ALLOWED_USERS)."""
     raw = os.environ.get("DISCORD_ALLOWED_USERS", "")
     return {int(x) for x in raw.split(",") if x.strip()}
-
-
-def _format_request(data: dict) -> str:
-    """Texto del pedido pendiente para mostrar en Discord."""
-    return (
-        f"**Pedido de comentario** en `{data['repo']}` · PR #{data['pr_number']}\n"
-        f"> {data['body']}\n\n"
-        f"¿Aprobar?"
-    )
 
 
 class ApprovalView(discord.ui.View):
@@ -69,8 +60,8 @@ class ApprovalView(discord.ui.View):
         await interaction.response.edit_message(
             content=f"⏳ Aprobado por {interaction.user.mention}. Encolando…", view=None
         )
-        moved = await approve(self.pool, self.approval_id)
-        if not moved:
+        task = await approve(self.pool, self.approval_id)
+        if not task:
             await interaction.edit_original_response(
                 content="⚠️ El pedido ya no existe (expiró o ya se resolvió)."
             )
@@ -101,7 +92,7 @@ class ApprovalView(discord.ui.View):
             )
             return
         if result:
-            await interaction.edit_original_response(content=f"✅ Comentario posteado: {result}")
+            await interaction.edit_original_response(content=f"✅ Hecho: {result}")
         else:
             await interaction.edit_original_response(
                 content="⚠️ El worker rechazó el pedido (allowlist o error). Ver logs."
@@ -137,7 +128,9 @@ class ApprovalBot(discord.Client):
                 continue
             data = json.loads(message["data"])
             view = ApprovalView(self.pool, data["approval_id"])
-            await channel.send(_format_request(data), view=view)
+            # `summary` viene ya formateado desde el productor (events.publish_pending):
+            # el bot es agnóstico de la acción concreta (comentar, etiquetar, ...).
+            await channel.send(data["summary"], view=view)
 
 
 def main() -> None:
