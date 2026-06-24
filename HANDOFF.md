@@ -4,12 +4,13 @@ Notas de handoff entre fases. Se actualiza al cerrar cada fase.
 
 ## Estado actual
 
-- **Fase 6b — Paridad n8n (4 workflows restantes): IMPLEMENTADA en `feat/f6b-parity`,
-  PENDIENTE de validación en el VPS.** No mergear hasta disparar los jobs en vivo.
+- **Fase 6b — Paridad n8n (4 workflows restantes): COMPLETA y validada en el VPS (2026-06-24),
+  mergeada a `main` (PR #8).** Con esto se alcanza **paridad funcional con n8n** (los 5
+  workflows). Habilita la Fase 7 (cutover).
 - **Fase 6a — Digest diario (arq cron + webhook): COMPLETA y validada en el VPS (2026-06-23),
   mergeada a `main` (PR #7).** Disparo manual posteó el digest en `#digest` (PR #7 listado).
 
-### Fase 6b — paridad n8n (IMPLEMENTADA, pendiente de validar — ver ADR-0010)
+### Fase 6b — paridad n8n (COMPLETA, validada 2026-06-24 — ver ADR-0010)
 
 Los 4 workflows restantes del inventario, reusando el patrón de la 6a (cron de arq en el
 mismo worker, entrega por webhook, sin approval gate, deterministas):
@@ -28,12 +29,14 @@ PASOS MANUALES para validar (sin webhook nuevo — reusa el de la 6a):
 2. Disparar los jobs a mano (heredoc en runbook → "Trabajos recurrentes — paridad n8n").
 3. Para ver un poll real: crear un issue / mergear un PR DESPUÉS del baseline y re-disparar.
 
-Checklist (validar en vivo):
-- [ ] `arq ... --check`: los 5 cron cargados; worker sin errores.
-- [ ] `stale_pr_alert` y `weekly_summary` postean en Discord (o stale calla si no hay estancados).
-- [ ] `new_issue_alert`: 1ª corrida = baseline; tras crear un issue, lo avisa una sola vez.
-- [ ] `deploy_notification`: tras mergear un PR a `main`, lo avisa una sola vez.
-- [ ] Cursores/seen-sets visibles en Redis (`keys cursor:*`).
+Checklist (validado en vivo 2026-06-24):
+- [x] `daily_pr_digest` disparó **solo** a las 09:00 (scheduling automático confirmado).
+- [x] `weekly_summary` posteó (disparo manual; 6 PRs mergeados + 1 issue cerrado). `stale_pr_alert`
+  calló por no haber PRs estancados (comportamiento correcto).
+- [x] `new_issue_alert`: 1ª corrida = baseline (nada); tras crear el issue #9 lo avisó **una sola
+  vez** (re-corrida no repitió → cursor + seen-set OK).
+- [~] `deploy_notification`: mismo mecanismo; se confirma solo en el próximo merge a `main`.
+- [x] Cursores/seen-sets visibles en Redis.
 - **Fase 5 — Triage de issues + lectura de docs: COMPLETA y validada en el VPS (2026-06-23),
   mergeada a `main` (PR #5).**
 - **Fase 4 — Infra de cola durable endurecida: COMPLETA y validada en el VPS (2026-06-23).**
