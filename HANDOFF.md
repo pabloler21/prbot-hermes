@@ -4,9 +4,14 @@ Notas de handoff entre fases. Se actualiza al cerrar cada fase.
 
 ## Estado actual
 
+- **🏁 PROYECTO COMPLETO (Fases 0–7).** Hermes + arq/Redis es el sistema; n8n retirado
+  (cutover documentado — n8n era simulado). Todo desplegado y validado en el VPS.
+- **Fase 7 — Cutover: COMPLETA (2026-06-24, doc-only).** Runbook de cutover (`docs/cutover.md`)
+  + ADR-0011. n8n simulado → se documenta el procedimiento (deshabilitar → observar 7d → baja
+  + export, con rollback) y se registra la evidencia de paridad. Sin apagado fingido.
 - **Fase 6b — Paridad n8n (4 workflows restantes): COMPLETA y validada en el VPS (2026-06-24),
   mergeada a `main` (PR #8).** Con esto se alcanza **paridad funcional con n8n** (los 5
-  workflows). Habilita la Fase 7 (cutover).
+  workflows). Habilitó la Fase 7.
 - **Fase 6a — Digest diario (arq cron + webhook): COMPLETA y validada en el VPS (2026-06-23),
   mergeada a `main` (PR #7).** Disparo manual posteó el digest en `#digest` (PR #7 listado).
 
@@ -35,7 +40,8 @@ Checklist (validado en vivo 2026-06-24):
   calló por no haber PRs estancados (comportamiento correcto).
 - [x] `new_issue_alert`: 1ª corrida = baseline (nada); tras crear el issue #9 lo avisó **una sola
   vez** (re-corrida no repitió → cursor + seen-set OK).
-- [~] `deploy_notification`: mismo mecanismo; se confirma solo en el próximo merge a `main`.
+- [x] `deploy_notification`: el merge del PR #8 a `main` lo avisó **solo** (poll automático,
+  10:50) — último workflow validado, de forma desatendida.
 - [x] Cursores/seen-sets visibles en Redis.
 - **Fase 5 — Triage de issues + lectura de docs: COMPLETA y validada en el VPS (2026-06-23),
   mergeada a `main` (PR #5).**
@@ -205,11 +211,11 @@ Entregado:
 
 ## Próxima fase
 
-- **Fase 7 — Cutover:** deshabilitar n8n (sin eliminar) → ventana de observación (7 días sin
-  errores, criterio de la Fase 2) → baja definitiva con export final guardado. Solo cuando la
-  6b esté validada y los 5 workflows corran estables. PASOS MANUALES (humano): deshabilitar y
-  luego dar de baja n8n.
-- Con la 6b se alcanza **paridad funcional** con n8n (los 5 workflows del inventario tienen su
-  equivalente en arq).
+- **Ninguna — roadmap del plan completo (Fases 0–7).** El sistema corre 24/7 en el VPS:
+  Hermes responde por Discord (lee GitHub vía MCP), publica/etiqueta con approval gate humano,
+  y arq/Redis hace toda la plomería recurrente (digest, alertas, resúmenes, deploys).
+- Posibles próximos pasos (fuera del plan original, si se quisiera seguir): los follow-ups no
+  bloqueantes (vistas persistentes del bot de aprobación; home-channel quirk de Hermes),
+  más repos en la allowlist, o un token-bucket por QPS si crece el caudal de poll.
 - **Pendiente menor (no bloqueante):** Hermes hoy responde solo por DM, no en el canal del
   server (quirk del home channel). Revisar `DISCORD_HOME_CHANNEL` en `~/.hermes/.env`.

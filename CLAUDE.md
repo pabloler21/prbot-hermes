@@ -10,7 +10,7 @@ This is a **portfolio/demo project**: the author must be able to explain and def
 
 Hermes is operated as a dependency — **do not fork it**. What gets versioned here is the configuration, the business guardrails, and the arq queues/workers. `plan-1-agente-hermes.md` is the authoritative, phase-by-phase execution plan. Read it before acting.
 
-## Current state (updated 2026-06-23)
+## Current state (updated 2026-06-24)
 
 - **Phase 0 (bootstrap):** ✅ merged to `main`.
 - **Phase 1 (Hermes live on Discord):** ✅ merged to `main`.
@@ -19,7 +19,8 @@ Hermes is operated as a dependency — **do not fork it**. What gets versioned h
 - **Phase 4 (durable-queue hardening):** ✅ **COMPLETE, validated end-to-end on the VPS, merged to `main`** (PR #3). Added a **dead-letter queue** (arq has none native — Redis list `dead-letter:post_comment`, capped, with manual requeue), a **concurrency cap** (`max_jobs=2`) as rate-limiting (arq has no QPS token-bucket; the human approval gate already throttles writes), and validated **reboot-survival** of the worker/bot services. See ADR-0007. NB: per the plan, Phase 4 was queue-infra hardening, **NOT** the n8n migration (that's Phase 6).
 - **Phase 5 (issue triage + documentation reading):** ✅ **COMPLETE, validated end-to-end on the VPS, merged to `main`** (PR #5). Reactive (Discord-triggered), reuses the approval gate. Commenting on issues already worked (`propose_pr_comment` serves PR *and* issue — same endpoint); reading issues/docs already worked via the read-only MCP. The only new write action is **applying labels**: tool `propose_issue_labels` → gate → task `apply_issue_labels` in the same worker. The approval gate was **generalized to be action-agnostic** (pending record carries `{task, data}`; bot shows a pre-formatted `summary`); DLQ is now per-task (`dead-letter:<task>`). Validated live: Hermes read issue #6, proposed `bug`+`priority:high`, the approval bot showed ✅/❌, approving applied the labels via GitHub (PAT `Issues: write` confirmed, no 403). See ADR-0008. **NB: Phase 5 is reactive — it does NOT add poll workers.** The first automatic/recurring work (and the per-QPS rate-limiting revisit) is **Phase 6** (daily digest via `cron_jobs`).
 - **Phase 6a (daily PR digest):** ✅ **COMPLETE, validated end-to-end on the VPS, merged to `main`** (PR #7). First **recurring** work: `daily_pr_digest` is an **arq `cron_jobs`** entry (mon-fri 09:00 UTC-3, explicit `timezone`) in the *same* worker (no new systemd service). It reads open PRs of the allowlisted repos and posts a deterministic Markdown digest to Discord via an **incoming webhook** (`discord_client.py`, `DISCORD_DIGEST_WEBHOOK_URL`, splits >2000 chars) — **no approval gate** (it only reads GitHub + posts to our own channel). Idempotent by scheduled time (`cron(unique=True)` → a restart near 09:00 doesn't double-send). Validated live: manual trigger posted the digest to `#digest` (webhook returned HTTP 204). See ADR-0009.
-- **Phase 6b (n8n parity — 4 remaining workflows):** ✅ **COMPLETE, validated end-to-end on the VPS, merged to `main`** (PR #8). Reaches **functional parity with n8n** (all 5 inventory workflows have an arq equivalent) → enables Phase 7. Validated live: the digest fired **automatically at 09:00** (unattended scheduling confirmed), weekly summary posted, and the poll set a baseline then alerted on a new issue (#9) **exactly once** (re-run didn't repeat → cursor + seen-set work). Reuses the 6a pattern (arq `cron_jobs` in the same worker, webhook delivery, no approval gate, deterministic): **Stale PR Alert** (cron 10:00, open PRs idle >3d, skips posting if none), **Weekly Summary** (cron Fri 18:00, merged PRs + closed issues in 7d), and two **poll** jobs every 5 min — **New Issue Alert** + **Deploy Notification** (PRs merged to `main`). The poll mechanism is new (`poll_state.py`): a Redis **cursor** (`cursor:<wf>:<repo>`) bounds the GitHub window, the **first run sets a baseline** (no historical spam), and a capped **seen-set** (`seen:<wf>:<repo>`) dedups (idempotency `repo+issue_number` / `repo+pr_number+merged_at`). **First automatic poll work** → per-QPS rate-limiting revisit deferred (the `max_jobs` cap suffices today; 2 polls/5min on 1 repo is negligible vs GitHub's 5000/h). See ADR-0010. Reaching parity enables **Phase 7 = cutover** (disable, observe 7d, retire n8n).
+- **Phase 7 (cutover):** ✅ **COMPLETE (doc-only).** n8n is **simulated**, so this phase delivers the **cutover *procedure* + parity evidence**, not a fake shutdown: `docs/cutover.md` (runbook: 6 criteria, two-phase disable→observe-7d→decommission, rollback, comms) + ADR-0011. Honest about the simulation. **🏁 The plan's roadmap (Phases 0–7) is COMPLETE.**
+- **Phase 6b (n8n parity — 4 remaining workflows):** ✅ **COMPLETE, validated end-to-end on the VPS, merged to `main`** (PR #8). Reaches **functional parity with n8n** (all 5 inventory workflows have an arq equivalent). Validated live: the digest fired **automatically at 09:00** (unattended scheduling), weekly summary posted, the poll set a baseline then alerted on a new issue (#9) **exactly once** (re-run didn't repeat → cursor + seen-set work), and `deploy_notification` caught the PR #8 merge to `main` **automatically**. Reuses the 6a pattern (arq `cron_jobs` in the same worker, webhook delivery, no approval gate, deterministic): **Stale PR Alert** (cron 10:00, open PRs idle >3d, skips posting if none), **Weekly Summary** (cron Fri 18:00, merged PRs + closed issues in 7d), and two **poll** jobs every 5 min — **New Issue Alert** + **Deploy Notification** (PRs merged to `main`). The poll mechanism is new (`poll_state.py`): a Redis **cursor** (`cursor:<wf>:<repo>`) bounds the GitHub window, the **first run sets a baseline** (no historical spam), and a capped **seen-set** (`seen:<wf>:<repo>`) dedups (idempotency `repo+issue_number` / `repo+pr_number+merged_at`). **First automatic poll work** → per-QPS rate-limiting revisit deferred (the `max_jobs` cap suffices today; 2 polls/5min on 1 repo is negligible vs GitHub's 5000/h). See ADR-0010. Reaching parity enables **Phase 7 = cutover** (disable, observe 7d, retire n8n).
 
 **Known follow-ups (non-blocking):**
 - Hermes currently replies only in DM, not in the server channel (home-channel quirk — see `DISCORD_HOME_CHANNEL`).
@@ -44,7 +45,7 @@ Hermes is operated as a dependency — **do not fork it**. What gets versioned h
 
 ## Branching
 
-- `main` reflects the deployed configuration (now through Phase 6b — n8n parity reached).
+- `main` reflects the deployed configuration (now through Phase 7 — project roadmap complete).
 - One **feature branch per phase**: `feat/fX-nombre`. Merge to `main` only when the checklist is complete. Every merge updates `HANDOFF.md` + ADR(s).
 
 ## Architecture (how the pieces fit)
@@ -64,8 +65,8 @@ Defense-in-depth: the GitHub PAT is scoped to read + comment + label only (`Issu
 ## Repo structure
 
 ```
-docs/adr/          # ADR-0001..0008, one+ per phase
-docs/n8n-inventory.md, docs/runbook.md
+docs/adr/          # ADR-0001..0011, one+ per phase
+docs/n8n-inventory.md, docs/runbook.md, docs/cutover.md
 config/hermes/     # config.yaml: intent/doc artifact only (LIVE config is on the VPS)
 config/guardrails/ # repo-allowlist.yaml, publish-approval policy
 hermes_queue/      # arq queue layer (Python):
