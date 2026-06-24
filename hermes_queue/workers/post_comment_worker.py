@@ -17,19 +17,32 @@ Correr el worker:
 from __future__ import annotations
 
 import logging
-from datetime import timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import httpx
 from arq import Retry, cron
 
 from hermes_queue.deadletter import record_dead_letter
 from hermes_queue.discord_client import post_to_discord
-from hermes_queue.github_client import add_issue_labels, post_pr_comment
+from hermes_queue.github_client import (
+    add_issue_labels,
+    list_new_issues,
+    list_recently_merged_prs,
+    post_pr_comment,
+)
 from hermes_queue.guardrails import allowed_repos, is_repo_allowed
+from hermes_queue.jobs.alerts import format_deploys, format_new_issues
 from hermes_queue.jobs.apply_labels import APPLY_LABELS_TASK, ApplyLabelsRequest
 from hermes_queue.jobs.digest import build_pr_digest
 from hermes_queue.jobs.post_comment import POST_COMMENT_TASK, PostCommentRequest
+from hermes_queue.jobs.reports import build_stale_pr_report, build_weekly_summary
+from hermes_queue.poll_state import get_cursor, mark_seen, set_cursor
 from hermes_queue.settings import redis_settings_from_env
+
+# Rama cuyos merges se reportan como deploy (la default del repo).
+DEPLOY_BRANCH = "main"
+# Cada cuántos minutos corren los jobs de poll.
+POLL_MINUTES = set(range(0, 60, 5))
 
 logger = logging.getLogger("hermes_queue.worker")
 
@@ -151,14 +164,92 @@ async def daily_pr_digest(ctx: dict) -> str:
     return texto
 
 
+async def stale_pr_alert(ctx: dict) -> str | None:
+    """Cron: avisa de PRs abiertos sin actividad por >3 días. No postea si no hay ninguno."""
+    texto = await build_stale_pr_report(allowed_repos())
+    if texto is None:
+        logger.info("Stale PR alert: sin PRs estancados, no se postea")
+        return None
+    await post_to_discord(texto)
+    logger.info("Stale PR alert posteado")
+    return texto
+
+
+async def weekly_summary(ctx: dict) -> str:
+    """Cron: resumen semanal de PRs mergeados + issues cerrados (siempre postea)."""
+    texto = await build_weekly_summary(allowed_repos())
+    await post_to_discord(texto)
+    logger.info("Weekly summary posteado")
+    return texto
+
+
+async def new_issue_alert(ctx: dict) -> None:
+    """Poll: avisa de issues nuevos desde la última corrida (cursor + dedup).
+
+    En la 1ª corrida solo fija el baseline (no avisa histórico). Después, trae los issues
+    creados luego del cursor, descarta los ya vistos, y postea los nuevos.
+    """
+    redis = ctx["redis"]
+    now = datetime.now(UTC)
+    for repo in allowed_repos():
+        name = f"new_issue:{repo}"
+        cursor = await get_cursor(redis, name)
+        if cursor is None:
+            await set_cursor(redis, name, now)  # baseline: nada histórico
+            continue
+        nuevos = [
+            it
+            for it in await list_new_issues(repo, cursor)
+            if await mark_seen(redis, name, str(it["number"]), now)
+        ]
+        if nuevos:
+            await post_to_discord(format_new_issues(repo, nuevos))
+            logger.info("New issue alert: %d nuevo(s) en %s", len(nuevos), repo)
+        await set_cursor(redis, name, now)
+
+
+async def deploy_notification(ctx: dict) -> None:
+    """Poll: avisa de PRs mergeados a la rama de deploy desde la última corrida.
+
+    Idempotencia por repo+pr_number+merged_at (un PR mergeado se reporta una sola vez).
+    """
+    redis = ctx["redis"]
+    now = datetime.now(UTC)
+    for repo in allowed_repos():
+        name = f"deploy:{repo}"
+        cursor = await get_cursor(redis, name)
+        if cursor is None:
+            await set_cursor(redis, name, now)  # baseline
+            continue
+        nuevos = []
+        for pr in await list_recently_merged_prs(repo, cursor):
+            if pr["base_ref"] != DEPLOY_BRANCH:
+                continue
+            seen_id = f"{pr['number']}:{pr['merged_at']}"
+            if await mark_seen(redis, name, seen_id, now):
+                nuevos.append(pr)
+        if nuevos:
+            await post_to_discord(format_deploys(repo, nuevos))
+            logger.info(
+                "Deploy notification: %d merge(s) a %s en %s", len(nuevos), DEPLOY_BRANCH, repo
+            )
+        await set_cursor(redis, name, now)
+
+
 class WorkerSettings:
     """Configuración que arq lee para arrancar el worker."""
 
     functions = [post_comment, apply_issue_labels]
     # Trabajo recurrente. `unique=True` es el default de arq: el job_id del cron es
-    # "<nombre>:<hora_programada>", así un reinicio cerca de las 9:00 NO duplica el envío.
+    # "<nombre>:<hora_programada>", así un reinicio cerca del horario NO duplica el envío.
     cron_jobs = [
+        # Reportes (deterministas, "foto del estado actual"):
         cron(daily_pr_digest, weekday={0, 1, 2, 3, 4}, hour=9, minute=0),  # lun-vie 09:00
+        cron(stale_pr_alert, weekday={0, 1, 2, 3, 4}, hour=10, minute=0),  # lun-vie 10:00
+        cron(weekly_summary, weekday=4, hour=18, minute=0),  # viernes 18:00 (4 = vie)
+        # Alerts (poll cada 5 min, con cursor + dedup en Redis):
+        cron(new_issue_alert, minute=POLL_MINUTES),
+        cron(deploy_notification, minute=POLL_MINUTES),
     ]
     timezone = TIMEZONE
     redis_settings = redis_settings_from_env()
